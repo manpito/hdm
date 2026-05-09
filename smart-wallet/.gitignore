@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.sqlite
+.env
+.vite/
+server.log
+frontend.log
+nohup.out
