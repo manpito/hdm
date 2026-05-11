@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-
-const API_URL = 'http://localhost:3001/api';
+import { API_URL } from '../config';
 
 const StockManagement = ({ token }) => {
   const [products, setProducts] = useState([]);

@@ -113,7 +113,7 @@ app.post('/api/cards/recharge', authenticateToken, async (req, res) => {
 });
 
 // --- Transações ---
-app.post('/api/transactions/bulk', async (req, res) => {
+app.post('/api/transactions/bulk', authenticateToken, async (req, res) => {
   const { card_id, items } = req.body;
 
   try {

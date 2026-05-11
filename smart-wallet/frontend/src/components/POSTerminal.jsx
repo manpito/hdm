@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { CreditCard, ShoppingCart } from 'lucide-react';
-
-const API_URL = 'http://localhost:3001/api';
+import { ShoppingCart } from 'lucide-react';
+import { API_URL } from '../config';
 
 const POSTerminal = ({ token }) => {
   const [products, setProducts] = useState([]);
@@ -53,7 +52,9 @@ const POSTerminal = ({ token }) => {
         }))
       };
 
-      await axios.post(`${API_URL}/transactions/bulk`, transactionData);
+      await axios.post(`${API_URL}/transactions/bulk`, transactionData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
       setStatus({ message: 'Venda realizada!', type: 'success' });
       setCart([]);

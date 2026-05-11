@@ -4,8 +4,7 @@ import { TrendingUp, AlertTriangle, Calendar, FileDown } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-
-const API_URL = 'http://localhost:3001/api';
+import { API_URL } from '../config';
 
 const ReportsDashboard = ({ token }) => {
   const [sales, setSales] = useState([]);
