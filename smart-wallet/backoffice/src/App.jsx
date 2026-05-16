@@ -19,9 +19,22 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import { API_URL } from './config';
-import { jsPDF } from 'jspdf';
+import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+
+const exportPDF = (headers, rows, filename) => {
+  const doc = new jsPDF();
+  doc.text('SmartWallet - Relatório', 14, 15);
+  doc.autoTable({
+    head: [headers],
+    body: rows,
+    startY: 25,
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [30, 27, 75] }
+  });
+  doc.save(`${filename}.pdf`);
+};
 
 // --- Auth Guard ---
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -435,25 +448,22 @@ const Reports = () => {
 
   useEffect(() => { fetchData(); }, [tab]);
 
-  const exportPDF = () => {
-    const doc = new jsPDF();
-    doc.text(`Relatório SmartWallet - ${tab.replace('_', ' ').toUpperCase()}`, 14, 15);
-    let headers, body;
+  const handleExportPDF = () => {
+    let headers, rows;
     if (tab === 'vendas_gerais' || tab === 'extrato_cartao') {
-      headers = [['Data', 'Produto', 'Terminal', 'UID Cartão', 'Entidade', 'Total (un.)']];
-      body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name || 'N/A', i.card_id, i.entity || '-', (i.total_price ?? 0).toFixed(2)]);
+      headers = ['Data', 'Produto', 'Terminal', 'UID Cartão', 'Entidade', 'Total (un.)'];
+      rows = data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name || 'N/A', i.card_id, i.entity || '-', (i.total_price ?? 0).toFixed(2)]);
     } else if (tab === 'por_produto') {
-      headers = [['Nome', 'Qtd Total Vendida', 'Total em Unidades']];
-      body = data.map(i => [i.name, i.quantity, (i.total ?? 0).toFixed(2)]);
+      headers = ['Nome', 'Qtd Total Vendida', 'Total em Unidades'];
+      rows = data.map(i => [i.name, i.quantity, (i.total ?? 0).toFixed(2)]);
     } else if (tab === 'stock') {
-      headers = [['Nome', 'Preço', 'Stock Disponível', 'Stock Mínimo']];
-      body = data.map(i => [i.name, (i.price ?? 0).toFixed(2), i.stock_quantity, i.stock_minimum]);
+      headers = ['Nome', 'Preço', 'Stock Disponível', 'Stock Mínimo'];
+      rows = data.map(i => [i.name, (i.price ?? 0).toFixed(2), i.stock_quantity, i.stock_minimum]);
     } else if (tab === 'carregamentos') {
-      headers = [['Data/Hora', 'UID Cartão', 'Titular', 'Valor (un.)', 'Operador', 'Entidade']];
-      body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.card_id, i.owner_name, (i.amount ?? 0).toFixed(2), i.username, i.entity || '-']);
+      headers = ['Data/Hora', 'UID Cartão', 'Titular', 'Valor (un.)', 'Operador', 'Entidade'];
+      rows = data.map(i => [new Date(i.timestamp).toLocaleString(), i.card_id, i.owner_name, (i.amount ?? 0).toFixed(2), i.username, i.entity || '-']);
     }
-    doc.autoTable({ startY: 20, head: headers, body: body });
-    doc.save(`${tab}.pdf`);
+    exportPDF(headers, rows, tab);
   };
 
   const exportExcel = () => {
@@ -554,7 +564,7 @@ const Reports = () => {
         )}
         <div className="flex gap-2 col-span-1">
           <button onClick={fetchData} className="bg-blue-600 text-white p-2 rounded flex-1 font-bold text-sm">Filtrar</button>
-          <button onClick={exportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center"><Download size={18}/></button>
+          <button onClick={handleExportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center"><Download size={18}/></button>
           <button onClick={exportExcel} className="bg-green-600 text-white p-2 rounded flex-1 font-bold text-sm">XLS</button>
         </div>
       </div>
@@ -699,13 +709,10 @@ const AuditLogs = () => {
 
   useEffect(() => { fetchLogs(); }, [page]);
 
-  const exportPDF = () => {
-    const doc = new jsPDF();
-    doc.text("Logs de Auditoria", 14, 15);
-    const headers = [['Data', 'Utilizador', 'Acção', 'Entidade', 'Detalhes']];
-    const body = data.logs.map(l => [new Date(l.timestamp).toLocaleString(), l.username, l.action, l.entity, l.details]);
-    doc.autoTable({ startY: 20, head: headers, body: body });
-    doc.save("audit_logs.pdf");
+  const handleExportPDF = () => {
+    const headers = ['Data', 'Utilizador', 'Acção', 'Entidade', 'Detalhes'];
+    const rows = data.logs.map(l => [new Date(l.timestamp).toLocaleString(), l.username, l.action, l.entity, l.details]);
+    exportPDF(headers, rows, 'audit_logs');
   };
 
   const exportExcel = () => {
@@ -731,7 +738,7 @@ const AuditLogs = () => {
          <input placeholder="Acção" className="p-2 border rounded text-sm" value={filters.action} onChange={e => setFilters({...filters, action: e.target.value})} />
          <div className="flex gap-2">
             <button onClick={() => { setPage(1); fetchLogs(); }} className="bg-blue-600 text-white p-2 rounded flex-1 font-bold">Filtrar</button>
-            <button onClick={exportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center items-center"><Download size={18}/></button>
+            <button onClick={handleExportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center items-center"><Download size={18}/></button>
             <button onClick={exportExcel} className="bg-green-600 text-white p-2 rounded flex-1 font-bold text-sm">XLS</button>
          </div>
       </div>
@@ -768,6 +775,7 @@ const CardsManagement = () => {
   const [tab, setTab] = useState('active');
   const [cards, setCards] = useState([]);
   const [filters, setFilters] = useState({ owner_name: '', is_active: '1', entity: '' });
+  const [search, setSearch] = useState('');
   const [form, setForm] = useState({ id: '', owner_name: '', entity: '', price_paid: '' });
   const [recharge, setRecharge] = useState({ id: '', amount: '' });
   const [config, setConfig] = useState({});
@@ -790,7 +798,15 @@ const CardsManagement = () => {
     setEntities(uniqueEntities);
   };
 
-  useEffect(() => { if (tab === 'active') fetchCards(); }, [tab, filters]);
+  useEffect(() => { if (tab === 'active') fetchCards(); }, [tab, filters.is_active, filters.entity]);
+
+  const filteredCards = cards.filter(card => {
+    const matchTitular = card.owner_name?.toLowerCase().includes(search.toLowerCase()) ?? true;
+    const matchEntity = !filters.entity || card.entity === filters.entity;
+    const matchStatus = !filters.is_active ||
+      (filters.is_active === '1' ? card.is_active === 1 : card.is_active === 0);
+    return matchTitular && matchEntity && matchStatus;
+  });
 
   const handleIssue = async (e) => {
     e.preventDefault();
@@ -828,7 +844,7 @@ const CardsManagement = () => {
       {tab === 'active' ? (
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-lg shadow-sm border flex gap-4">
-             <input placeholder="Filtrar por titular..." className="p-2 border rounded flex-1" value={filters.owner_name} onChange={e => setFilters({...filters, owner_name: e.target.value})} />
+             <input placeholder="Filtrar por titular..." className="p-2 border rounded flex-1" value={search} onChange={e => setSearch(e.target.value)} />
              <select className="p-2 border rounded" value={filters.entity} onChange={e => setFilters({...filters, entity: e.target.value})}>
                 <option value="">Todas Entidades</option>
                 {entities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
@@ -847,7 +863,7 @@ const CardsManagement = () => {
                     <tr><th className="p-4">UID / Titular</th><th className="p-4">Entidade</th><th className="p-4">Saldo</th><th className="p-4">Criado em</th><th className="p-4">Estado</th><th className="p-4">Acções</th></tr>
                   </thead>
                   <tbody>
-                    {cards.map(c => (
+                    {filteredCards.map(c => (
                       <tr key={c.id} className="border-b hover:bg-gray-50 transition">
                         <td className="p-4">
                           <p className="font-mono text-[10px] text-gray-400">{c.id}</p>

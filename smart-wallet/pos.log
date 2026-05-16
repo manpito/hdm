@@ -1,9 +1,0 @@
-
-> pos@0.0.0 dev
-> vite --port 5173
-
-
-  VITE v8.0.13  ready in 1485 ms
-
-  ➜  Local:   http://localhost:5173/
-  ➜  Network: use --host to expose
