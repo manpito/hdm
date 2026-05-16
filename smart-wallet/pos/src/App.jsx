@@ -10,6 +10,7 @@ const POS = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [products, setProducts] = useState([]);
+  const [quantities, setQuantities] = useState({}); // { productId: quantity }
   const [cart, setCart] = useState([]);
   const [cardId, setCardId] = useState('');
   const [status, setStatus] = useState({ msg: '', type: '' });
@@ -26,6 +27,10 @@ const POS = () => {
     try {
       const res = await axios.get(`${API_URL}/products`, { headers: { Authorization: `Bearer ${token}` } });
       setProducts(res.data);
+      // Initialize quantities for each product
+      const initialQuants = {};
+      res.data.forEach(p => initialQuants[p.id] = 1);
+      setQuantities(initialQuants);
     } catch (err) { setError('Falha ao carregar produtos'); }
   };
 
@@ -54,9 +59,40 @@ const POS = () => {
   };
 
   const addToCart = (p) => {
+    const qtyToAdd = parseInt(quantities[p.id] || 1);
+    if (isNaN(qtyToAdd) || qtyToAdd <= 0) return;
+
     const existing = cart.find(item => item.id === p.id);
-    if (existing) setCart(cart.map(i => i.id === p.id ? {...i, quantity: i.quantity + 1} : i));
-    else setCart([...cart, {...p, quantity: 1}]);
+    const currentQtyInCart = existing ? existing.quantity : 0;
+    const totalNewQty = currentQtyInCart + qtyToAdd;
+
+    if (totalNewQty > p.stock_quantity) {
+      setStatus({ msg: `Stock insuficiente para ${p.name}`, type: 'err' });
+      return;
+    }
+
+    if (existing) {
+      setCart(cart.map(i => i.id === p.id ? { ...i, quantity: totalNewQty } : i));
+    } else {
+      setCart([...cart, { ...p, quantity: qtyToAdd }]);
+    }
+
+    // Reset quantity input to 1 after adding
+    setQuantities({ ...quantities, [p.id]: 1 });
+    setStatus({ msg: '', type: '' });
+  };
+
+  const updateCartQty = (productId, delta) => {
+    const product = products.find(p => p.id === productId);
+    setCart(cart.map(item => {
+      if (item.id === productId) {
+        const newQty = item.quantity + delta;
+        if (newQty > 0 && newQty <= product.stock_quantity) {
+          return { ...item, quantity: newQty };
+        }
+      }
+      return item;
+    }));
   };
 
   const checkout = async () => {
@@ -99,19 +135,43 @@ const POS = () => {
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {products.map(p => (
-            <button
+            <div
               key={p.id}
-              onClick={() => addToCart(p)}
-              disabled={p.stock_quantity <= 0}
-              className={`bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition transform active:scale-95 text-left flex flex-col ${p.stock_quantity <= 0 ? 'opacity-50 grayscale border-gray-200' : 'hover:border-blue-500 border-transparent'}`}
+              className={`bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition text-left flex flex-col ${p.stock_quantity <= 0 ? 'opacity-50 grayscale border-gray-200' : 'hover:border-blue-500 border-transparent'}`}
             >
               {p.image_base64 ? <img src={p.image_base64} className="h-32 w-full object-cover" /> : <div className="h-32 bg-gray-100 flex items-center justify-center text-gray-300 font-bold uppercase text-[10px] text-center px-4">Sem Imagem</div>}
-              <div className="p-4 flex-1">
+              <div className="p-4 flex-1 flex flex-col">
                 <h4 className="font-bold text-gray-800 mb-1 leading-tight">{p.name}</h4>
                 <p className="text-blue-600 font-black text-lg">{(p.price ?? 0).toFixed(2)} un.</p>
-                <p className={`text-[10px] mt-2 font-bold uppercase ${p.stock_quantity <= 0 ? 'text-red-500' : 'text-gray-400'}`}>Stock: {p.stock_quantity}</p>
+                <p className={`text-[10px] mt-1 font-bold uppercase ${p.stock_quantity <= 0 ? 'text-red-500' : 'text-gray-400'}`}>Stock: {p.stock_quantity}</p>
+
+                {p.stock_quantity > 0 && (
+                  <div className="mt-auto pt-4 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] font-bold text-gray-400 uppercase">Qtd:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max={p.stock_quantity}
+                        value={quantities[p.id] || 1}
+                        onChange={(e) => setQuantities({ ...quantities, [p.id]: e.target.value })}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`w-full p-1 border rounded font-bold text-center ${parseInt(quantities[p.id]) > p.stock_quantity ? 'border-red-500 text-red-600' : 'border-gray-200'}`}
+                      />
+                    </div>
+                    {parseInt(quantities[p.id]) > p.stock_quantity && (
+                      <p className="text-[9px] text-red-500 font-bold uppercase">Excede Stock!</p>
+                    )}
+                    <button
+                      onClick={() => addToCart(p)}
+                      className="w-full bg-blue-600 text-white py-2 rounded-xl font-bold text-xs hover:bg-blue-700 active:scale-95 transition transform"
+                    >
+                      ADICIONAR
+                    </button>
+                  </div>
+                )}
               </div>
-            </button>
+            </div>
           ))}
         </div>
       </div>
@@ -125,12 +185,20 @@ const POS = () => {
         <div className="flex-1 p-6 overflow-y-auto space-y-4">
           {cart.length === 0 && <p className="text-gray-400 italic text-center mt-20">Carrinho vazio</p>}
           {cart.map(item => (
-            <div key={item.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border">
-              <div>
-                <p className="font-bold text-sm">{item.name}</p>
-                <p className="text-xs text-blue-600">{item.quantity}x {(item.price ?? 0).toFixed(2)}</p>
+            <div key={item.id} className="flex flex-col bg-gray-50 p-3 rounded-xl border gap-2">
+              <div className="flex justify-between items-start">
+                <p className="font-bold text-sm">
+                  {item.quantity}x {item.name} — {(item.quantity * item.price).toFixed(2)}
+                </p>
+                <button onClick={() => setCart(cart.filter(i => i.id !== item.id))} className="text-red-400 hover:text-red-600 font-bold">X</button>
               </div>
-              <button onClick={() => setCart(cart.filter(i => i.id !== item.id))} className="text-red-400 hover:text-red-600 font-bold">X</button>
+              <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-gray-100">
+                 <div className="flex items-center gap-3">
+                    <button onClick={() => updateCartQty(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200">-</button>
+                    <span className="font-black text-blue-900">{item.quantity}</span>
+                    <button onClick={() => updateCartQty(item.id, 1)} className="w-8 h-8 flex items-center justify-center bg-gray-100 rounded-full font-bold hover:bg-gray-200">+</button>
+                 </div>
+              </div>
             </div>
           ))}
         </div>
