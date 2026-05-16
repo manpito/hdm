@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -355,8 +355,17 @@ const Reports = () => {
   const exportPDF = () => {
     const doc = new jsPDF();
     doc.text(`Relatorio SmartWallet - ${tab}`, 14, 15);
-    const headers = tab === 'products' ? [['Nome', 'Qtd', 'Total']] : tab === 'stock' ? [['Nome', 'Preço', 'Stock']] : [['Data', 'Produto', 'Terminal', 'Total']];
-    const body = tab === 'products' ? data.map(i => [i.name, i.quantity, i.total]) : tab === 'stock' ? data.map(i => [i.name, i.price, i.stock_quantity]) : data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name, i.total_price]);
+    let headers, body;
+    if (tab === 'general') {
+      headers = [['Data', 'Produto', 'Terminal', 'Cartão (UID)', 'Total (un.)']];
+      body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name || 'N/A', i.card_id, i.total_price.toFixed(2)]);
+    } else if (tab === 'products') {
+      headers = [['Nome', 'Quantidade Vendida', 'Total em Unidades']];
+      body = data.map(i => [i.name, i.quantity, i.total.toFixed(2)]);
+    } else {
+      headers = [['Nome', 'Preço', 'Quantidade Disponível']];
+      body = data.map(i => [i.name, i.price.toFixed(2), i.stock_quantity]);
+    }
     doc.autoTable({ startY: 20, head: headers, body: body });
     doc.save(`${tab}.pdf`);
   };
@@ -371,8 +380,72 @@ const Reports = () => {
       <div className="flex justify-end gap-2">
         <button onClick={exportPDF} className="flex items-center gap-1 bg-red-600 text-white px-3 py-1 rounded text-sm"><Download size={14}/> PDF</button>
       </div>
-      <div className="bg-white border rounded shadow-sm p-4">
-         {loading ? 'Carregando...' : <pre className="text-xs">{JSON.stringify(data, null, 2)}</pre>}
+      <div className="bg-white border rounded shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="p-8 text-center text-gray-500 italic">Carregando dados...</div>
+        ) : (
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 border-b uppercase text-xs font-bold text-gray-600">
+              {tab === 'general' && (
+                <tr>
+                  <th className="p-3">Data</th>
+                  <th className="p-3">Produto</th>
+                  <th className="p-3">Terminal</th>
+                  <th className="p-3">Cartão (UID)</th>
+                  <th className="p-3">Total (un.)</th>
+                </tr>
+              )}
+              {tab === 'products' && (
+                <tr>
+                  <th className="p-3">Nome do Produto</th>
+                  <th className="p-3">Qtd Vendida</th>
+                  <th className="p-3">Total (un.)</th>
+                </tr>
+              )}
+              {tab === 'stock' && (
+                <tr>
+                  <th className="p-3">Nome</th>
+                  <th className="p-3">Preço</th>
+                  <th className="p-3">Stock Disponível</th>
+                </tr>
+              )}
+            </thead>
+            <tbody>
+              {data.map((item, idx) => (
+                <tr key={idx} className="border-b hover:bg-gray-50">
+                  {tab === 'general' && (
+                    <>
+                      <td className="p-3 whitespace-nowrap">{new Date(item.timestamp).toLocaleString()}</td>
+                      <td className="p-3 font-bold">{item.product_name}</td>
+                      <td className="p-3">{item.terminal_name || <span className="text-gray-400 italic">Central</span>}</td>
+                      <td className="p-3 font-mono text-xs">{item.card_id}</td>
+                      <td className="p-3 font-bold text-blue-600">{item.total_price.toFixed(2)}</td>
+                    </>
+                  )}
+                  {tab === 'products' && (
+                    <>
+                      <td className="p-3 font-bold">{item.name}</td>
+                      <td className="p-3">{item.quantity}</td>
+                      <td className="p-3 font-bold text-blue-600">{item.total.toFixed(2)}</td>
+                    </>
+                  )}
+                  {tab === 'stock' && (
+                    <>
+                      <td className="p-3 font-bold">{item.name}</td>
+                      <td className="p-3">{item.price.toFixed(2)}</td>
+                      <td className={`p-3 font-bold ${item.stock_quantity < 10 ? 'text-red-600' : 'text-green-600'}`}>{item.stock_quantity}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+              {data.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="p-8 text-center text-gray-400 italic">Nenhuns dados encontrados para este relatório.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
