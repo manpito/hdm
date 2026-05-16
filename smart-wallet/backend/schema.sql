@@ -21,12 +21,18 @@ CREATE TABLE IF NOT EXISTS products (
   name TEXT NOT NULL,
   price REAL NOT NULL,
   stock_quantity INTEGER NOT NULL DEFAULT 0,
+  stock_minimum INTEGER DEFAULT 5,
   image_base64 TEXT
 );
 
 CREATE TABLE IF NOT EXISTS cards (
   id TEXT PRIMARY KEY, -- NFC UID
-  balance REAL NOT NULL DEFAULT 0
+  owner_name TEXT,
+  entity TEXT,
+  balance REAL NOT NULL DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  price_paid REAL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS sales (
@@ -40,4 +46,22 @@ CREATE TABLE IF NOT EXISTS sales (
   FOREIGN KEY (card_id) REFERENCES cards(id),
   FOREIGN KEY (product_id) REFERENCES products(id),
   FOREIGN KEY (terminal_id) REFERENCES terminals(id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  username TEXT NOT NULL,
+  action TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  entity_id TEXT,
+  details TEXT,
+  amount REAL,
+  ip_address TEXT,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );

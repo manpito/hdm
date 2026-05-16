@@ -14,8 +14,39 @@ async function initDb() {
     driver: sqlite3.Database
   });
 
+  // Apply schema
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.exec(schema);
+
+  // Migration: Safe Column Addition
+  const addColumnIfNotExists = async (table, column, type) => {
+    const cols = await db.all(`PRAGMA table_info(${table})`);
+    if (!cols.find(c => c.name === column)) {
+      await db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  };
+
+  await addColumnIfNotExists('products', 'stock_minimum', 'INTEGER DEFAULT 5');
+  await addColumnIfNotExists('cards', 'owner_name', 'TEXT');
+  await addColumnIfNotExists('cards', 'entity', 'TEXT');
+  await addColumnIfNotExists('cards', 'is_active', 'INTEGER DEFAULT 1');
+  await addColumnIfNotExists('cards', 'price_paid', 'REAL DEFAULT 0');
+  await addColumnIfNotExists('cards', 'created_at', 'DATETIME');
+  await addColumnIfNotExists('audit_logs', 'amount', 'REAL');
+
+  // Seed Settings
+  const settings = [
+    { key: 'installationName', value: 'SmartWallet Central' },
+    { key: 'stockThreshold', value: '10' },
+    { key: 'nfcCardPrice', value: '500' }
+  ];
+
+  for (const s of settings) {
+    const exists = await db.get('SELECT 1 FROM settings WHERE key = ?', s.key);
+    if (!exists) {
+      await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', [s.key, s.value]);
+    }
+  }
 
   // Seed Initial Data
   const adminExists = await db.get('SELECT * FROM users WHERE username = ?', 'admin');

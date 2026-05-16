@@ -105,10 +105,10 @@ const POS = () => {
               disabled={p.stock_quantity <= 0}
               className={`bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition transform active:scale-95 text-left flex flex-col ${p.stock_quantity <= 0 ? 'opacity-50 grayscale border-gray-200' : 'hover:border-blue-500 border-transparent'}`}
             >
-              {p.image_base64 ? <img src={p.image_base64} className="h-32 w-full object-cover" /> : <div className="h-32 bg-gray-100 flex items-center justify-center text-gray-300 font-bold uppercase text-xs">Sem Imagem</div>}
+              {p.image_base64 ? <img src={p.image_base64} className="h-32 w-full object-cover" /> : <div className="h-32 bg-gray-100 flex items-center justify-center text-gray-300 font-bold uppercase text-[10px] text-center px-4">Sem Imagem</div>}
               <div className="p-4 flex-1">
                 <h4 className="font-bold text-gray-800 mb-1 leading-tight">{p.name}</h4>
-                <p className="text-blue-600 font-black text-lg">{p.price.toFixed(2)} un.</p>
+                <p className="text-blue-600 font-black text-lg">{(p.price ?? 0).toFixed(2)} un.</p>
                 <p className={`text-[10px] mt-2 font-bold uppercase ${p.stock_quantity <= 0 ? 'text-red-500' : 'text-gray-400'}`}>Stock: {p.stock_quantity}</p>
               </div>
             </button>
@@ -128,7 +128,7 @@ const POS = () => {
             <div key={item.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border">
               <div>
                 <p className="font-bold text-sm">{item.name}</p>
-                <p className="text-xs text-blue-600">{item.quantity}x {item.price.toFixed(2)}</p>
+                <p className="text-xs text-blue-600">{item.quantity}x {(item.price ?? 0).toFixed(2)}</p>
               </div>
               <button onClick={() => setCart(cart.filter(i => i.id !== item.id))} className="text-red-400 hover:text-red-600 font-bold">X</button>
             </div>
@@ -138,7 +138,7 @@ const POS = () => {
         <div className="p-6 bg-gray-50 border-t space-y-4">
           <div className="flex justify-between items-end mb-2">
             <span className="text-gray-500 font-bold uppercase text-xs">Total a pagar</span>
-            <span className="text-3xl font-black text-blue-900">{cart.reduce((a,b)=>a+(b.price*b.quantity), 0).toFixed(2)} un.</span>
+            <span className="text-3xl font-black text-blue-900">{(cart.reduce((a,b)=>a+(b.price*b.quantity), 0) ?? 0).toFixed(2)} un.</span>
           </div>
 
           <div className="relative">
