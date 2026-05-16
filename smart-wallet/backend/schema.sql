@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE TABLE IF NOT EXISTS cards (
   id TEXT PRIMARY KEY, -- NFC UID
   owner_name TEXT,
+  entity TEXT,
   balance REAL NOT NULL DEFAULT 0,
   is_active INTEGER DEFAULT 1,
   price_paid REAL DEFAULT 0,

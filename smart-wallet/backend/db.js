@@ -19,23 +19,19 @@ async function initDb() {
   await db.exec(schema);
 
   // Migration: Safe Column Addition
-  const tableInfos = {
-    products: await db.all('PRAGMA table_info(products)'),
-    cards: await db.all('PRAGMA table_info(cards)'),
-    audit_logs: await db.all('PRAGMA table_info(audit_logs)')
-  };
-
   const addColumnIfNotExists = async (table, column, type) => {
-    if (!tableInfos[table].some(c => c.name === column)) {
+    const cols = await db.all(`PRAGMA table_info(${table})`);
+    if (!cols.find(c => c.name === column)) {
       await db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
   };
 
   await addColumnIfNotExists('products', 'stock_minimum', 'INTEGER DEFAULT 5');
   await addColumnIfNotExists('cards', 'owner_name', 'TEXT');
+  await addColumnIfNotExists('cards', 'entity', 'TEXT');
   await addColumnIfNotExists('cards', 'is_active', 'INTEGER DEFAULT 1');
   await addColumnIfNotExists('cards', 'price_paid', 'REAL DEFAULT 0');
-  await addColumnIfNotExists('cards', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+  await addColumnIfNotExists('cards', 'created_at', 'DATETIME');
   await addColumnIfNotExists('audit_logs', 'amount', 'REAL');
 
   // Seed Settings

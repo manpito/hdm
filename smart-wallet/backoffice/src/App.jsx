@@ -141,7 +141,7 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded shadow-sm border-l-4 border-blue-600">
           <p className="text-xs uppercase text-gray-500 font-bold mb-1">Vendas Hoje</p>
-          <p className="text-2xl font-bold">{data.salesToday.toFixed(2)}</p>
+          <p className="text-2xl font-bold">{(data.salesToday ?? 0).toFixed(2)}</p>
         </div>
         <div className="bg-white p-6 rounded shadow-sm border-l-4 border-orange-500">
           <p className="text-xs uppercase text-gray-500 font-bold mb-1">Alertas Stock</p>
@@ -169,7 +169,7 @@ const Dashboard = () => {
          </div>
          <div className="text-right">
             <p className="text-xs font-bold uppercase opacity-50">Diferença</p>
-            <p className={`text-3xl font-black ${recon.isBalanced ? 'text-green-600' : 'text-red-600'}`}>{recon.discrepancy.toFixed(2)} un.</p>
+            <p className={`text-3xl font-black ${recon.isBalanced ? 'text-green-600' : 'text-red-600'}`}>{(recon.discrepancy ?? 0).toFixed(2)} un.</p>
          </div>
       </div>
     </div>
@@ -395,15 +395,22 @@ const Reports = () => {
   const [tab, setTab] = useState('vendas_gerais');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', terminalId: '', productId: '', cardId: '' });
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', terminalId: '', productId: '', cardId: '', userId: '', entity: '' });
   const [terminals, setTerminals] = useState([]);
   const [products, setProducts] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [entities, setEntities] = useState([]);
   const [cardData, setCardData] = useState(null);
 
   useEffect(() => {
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
     axios.get(`${API_URL}/terminals`, config).then(res => setTerminals(res.data));
     axios.get(`${API_URL}/products`, config).then(res => setProducts(res.data));
+    axios.get(`${API_URL}/users`, config).then(res => setUsers(res.data));
+    axios.get(`${API_URL}/cards`, config).then(res => {
+      const uniqueEntities = [...new Set(res.data.map(c => c.entity).filter(Boolean))];
+      setEntities(uniqueEntities);
+    });
   }, []);
 
   const fetchData = async () => {
@@ -420,7 +427,8 @@ const Reports = () => {
         res.data = res.data.sales;
       }
       else if (tab === 'stock') res = await axios.get(`${API_URL}/products`, config);
-      setData(res.data);
+      else if (tab === 'carregamentos') res = await axios.get(`${API_URL}/reports/recharges`, config);
+      setData(res.data || []);
     } catch (e) { alert('Erro ao carregar dados'); }
     setLoading(false);
   };
@@ -432,14 +440,17 @@ const Reports = () => {
     doc.text(`Relatório SmartWallet - ${tab.replace('_', ' ').toUpperCase()}`, 14, 15);
     let headers, body;
     if (tab === 'vendas_gerais' || tab === 'extrato_cartao') {
-      headers = [['Data', 'Produto', 'Terminal', 'Cartão (UID)', 'Total (un.)']];
-      body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name || 'N/A', i.card_id, i.total_price.toFixed(2)]);
+      headers = [['Data', 'Produto', 'Terminal', 'UID Cartão', 'Entidade', 'Total (un.)']];
+      body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name || 'N/A', i.card_id, i.entity || '-', (i.total_price ?? 0).toFixed(2)]);
     } else if (tab === 'por_produto') {
       headers = [['Nome', 'Qtd Total Vendida', 'Total em Unidades']];
-      body = data.map(i => [i.name, i.quantity, i.total.toFixed(2)]);
+      body = data.map(i => [i.name, i.quantity, (i.total ?? 0).toFixed(2)]);
     } else if (tab === 'stock') {
       headers = [['Nome', 'Preço', 'Stock Disponível', 'Stock Mínimo']];
-      body = data.map(i => [i.name, i.price.toFixed(2), i.stock_quantity, i.stock_minimum]);
+      body = data.map(i => [i.name, (i.price ?? 0).toFixed(2), i.stock_quantity, i.stock_minimum]);
+    } else if (tab === 'carregamentos') {
+      headers = [['Data/Hora', 'UID Cartão', 'Titular', 'Valor (un.)', 'Operador', 'Entidade']];
+      body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.card_id, i.owner_name, (i.amount ?? 0).toFixed(2), i.username, i.entity || '-']);
     }
     doc.autoTable({ startY: 20, head: headers, body: body });
     doc.save(`${tab}.pdf`);
@@ -452,7 +463,8 @@ const Reports = () => {
         Data: new Date(i.timestamp).toLocaleString(),
         Produto: i.product_name,
         Terminal: i.terminal_name || 'N/A',
-        'Cartão (UID)': i.card_id,
+        'UID Cartão': i.card_id,
+        Entidade: i.entity || '-',
         'Total (un.)': i.total_price
       }));
     } else if (tab === 'por_produto') {
@@ -468,6 +480,15 @@ const Reports = () => {
         'Stock Disponível': i.stock_quantity,
         'Stock Mínimo': i.stock_minimum
       }));
+    } else if (tab === 'carregamentos') {
+      exportData = data.map(i => ({
+        'Data/Hora': new Date(i.timestamp).toLocaleString(),
+        'UID Cartão': i.card_id,
+        Titular: i.owner_name,
+        'Valor (un.)': i.amount,
+        Operador: i.username,
+        Entidade: i.entity || '-'
+      }));
     }
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -479,6 +500,7 @@ const Reports = () => {
     { id: 'vendas_gerais', label: 'Vendas Gerais' },
     { id: 'por_produto', label: 'Por Produto' },
     { id: 'extrato_cartao', label: 'Extrato por Cartão' },
+    { id: 'carregamentos', label: 'Carregamentos' },
     { id: 'stock', label: 'Stock' }
   ];
 
@@ -518,6 +540,18 @@ const Reports = () => {
         {tab === 'extrato_cartao' && (
           <input placeholder="UID do Cartão" className="p-2 border rounded text-sm" value={filters.cardId} onChange={e => setFilters({...filters, cardId: e.target.value})} />
         )}
+        {tab === 'carregamentos' && (
+          <>
+            <select className="p-2 border rounded text-sm" value={filters.userId} onChange={e => setFilters({...filters, userId: e.target.value})}>
+              <option value="">Todos Operadores</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+            </select>
+            <select className="p-2 border rounded text-sm" value={filters.entity} onChange={e => setFilters({...filters, entity: e.target.value})}>
+              <option value="">Todas Entidades</option>
+              {entities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
+            </select>
+          </>
+        )}
         <div className="flex gap-2 col-span-1">
           <button onClick={fetchData} className="bg-blue-600 text-white p-2 rounded flex-1 font-bold text-sm">Filtrar</button>
           <button onClick={exportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center"><Download size={18}/></button>
@@ -530,10 +564,11 @@ const Reports = () => {
            <div>
               <p className="text-xs text-blue-600 font-bold uppercase">Titular</p>
               <h3 className="text-xl font-black">{cardData.owner_name || 'Desconhecido'}</h3>
+              <p className="text-[10px] font-bold text-blue-400 uppercase">{cardData.entity || '-'}</p>
            </div>
            <div className="text-right">
               <p className="text-xs text-blue-600 font-bold uppercase">Saldo Atual</p>
-              <h3 className="text-2xl font-black text-blue-900">{cardData.balance.toFixed(2)} un.</h3>
+              <h3 className="text-2xl font-black text-blue-900">{(cardData.balance ?? 0).toFixed(2)} un.</h3>
            </div>
         </div>
       )}
@@ -542,7 +577,7 @@ const Reports = () => {
         <table className="w-full text-sm text-left">
           <thead className="bg-gray-50 border-b uppercase text-[10px] font-black text-gray-500">
             {(tab === 'vendas_gerais' || tab === 'extrato_cartao') && (
-              <tr><th className="p-4">Data/Hora</th><th className="p-4">Produto</th><th className="p-4">Terminal</th><th className="p-4">UID Cartão</th><th className="p-4 text-right">Total</th></tr>
+              <tr><th className="p-4">Data/Hora</th><th className="p-4">Produto</th><th className="p-4">Terminal</th><th className="p-4">UID Cartão</th><th className="p-4">Entidade</th><th className="p-4 text-right">Total</th></tr>
             )}
             {tab === 'por_produto' && (
               <tr><th className="p-4">Nome do Produto</th><th className="p-4">Qtd Vendida</th><th className="p-4 text-right">Total (un.)</th></tr>
@@ -550,9 +585,12 @@ const Reports = () => {
             {tab === 'stock' && (
               <tr><th className="p-4">Nome</th><th className="p-4">Preço</th><th className="p-4">Stock Disp.</th><th className="p-4">Stock Mín.</th></tr>
             )}
+            {tab === 'carregamentos' && (
+              <tr><th className="p-4">Data/Hora</th><th className="p-4">UID Cartão</th><th className="p-4">Titular</th><th className="p-4 text-right">Valor</th><th className="p-4">Operador</th><th className="p-4">Entidade</th></tr>
+            )}
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan="5" className="p-10 text-center italic text-gray-400">Carregando dados...</td></tr> : (
+            {loading ? <tr><td colSpan="6" className="p-10 text-center italic text-gray-400">Carregando dados...</td></tr> : (
               data.map((item, idx) => (
                 <tr key={idx} className="border-b hover:bg-gray-50 transition">
                   {(tab === 'vendas_gerais' || tab === 'extrato_cartao') && (
@@ -561,29 +599,40 @@ const Reports = () => {
                       <td className="p-4 font-bold">{item.product_name}</td>
                       <td className="p-4 text-gray-500">{item.terminal_name || 'Central'}</td>
                       <td className="p-4 font-mono text-[10px]">{item.card_id}</td>
-                      <td className="p-4 text-right font-black text-blue-600">{item.total_price.toFixed(2)}</td>
+                      <td className="p-4 text-[10px] font-bold text-gray-400">{item.entity || '-'}</td>
+                      <td className="p-4 text-right font-black text-blue-600">{(item.total_price ?? 0).toFixed(2)}</td>
                     </>
                   )}
                   {tab === 'por_produto' && (
                     <>
                       <td className="p-4 font-bold">{item.name}</td>
                       <td className="p-4">{item.quantity}</td>
-                      <td className="p-4 text-right font-black text-blue-600">{item.total.toFixed(2)}</td>
+                      <td className="p-4 text-right font-black text-blue-600">{(item.total ?? 0).toFixed(2)}</td>
                     </>
                   )}
                   {tab === 'stock' && (
                     <>
                       <td className="p-4 font-bold">{item.name}</td>
-                      <td className="p-4 font-medium text-gray-600">{item.price.toFixed(2)}</td>
+                      <td className="p-4 font-medium text-gray-600">{(item.price ?? 0).toFixed(2)}</td>
                       <td className={`p-4 font-black ${item.stock_quantity < item.stock_minimum ? 'text-red-600' : 'text-green-600'}`}>{item.stock_quantity}</td>
                       <td className="p-4 text-gray-400 font-bold">{item.stock_minimum}</td>
+                    </>
+                  )}
+                  {tab === 'carregamentos' && (
+                    <>
+                      <td className="p-4 whitespace-nowrap">{new Date(item.timestamp).toLocaleString()}</td>
+                      <td className="p-4 font-mono text-[10px]">{item.card_id}</td>
+                      <td className="p-4 font-bold">{item.owner_name}</td>
+                      <td className="p-4 text-right font-black text-green-600">{(item.amount ?? 0).toFixed(2)}</td>
+                      <td className="p-4 text-gray-600">{item.username}</td>
+                      <td className="p-4 text-[10px] font-bold text-gray-400">{item.entity || '-'}</td>
                     </>
                   )}
                 </tr>
               ))
             )}
             {!loading && data.length === 0 && (
-              <tr><td colSpan="5" className="p-10 text-center italic text-gray-400">Nenhuns dados encontrados.</td></tr>
+              <tr><td colSpan="6" className="p-10 text-center italic text-gray-400">Nenhuns dados encontrados.</td></tr>
             )}
           </tbody>
         </table>
@@ -718,10 +767,11 @@ const AuditLogs = () => {
 const CardsManagement = () => {
   const [tab, setTab] = useState('active');
   const [cards, setCards] = useState([]);
-  const [filters, setFilters] = useState({ owner_name: '', is_active: 1 });
-  const [form, setForm] = useState({ id: '', owner_name: '', price_paid: '' });
+  const [filters, setFilters] = useState({ owner_name: '', is_active: '1', entity: '' });
+  const [form, setForm] = useState({ id: '', owner_name: '', entity: '', price_paid: '' });
   const [recharge, setRecharge] = useState({ id: '', amount: '' });
   const [config, setConfig] = useState({});
+  const [entities, setEntities] = useState([]);
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -736,6 +786,8 @@ const CardsManagement = () => {
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params: filters };
     const res = await axios.get(`${API_URL}/cards`, config);
     setCards(res.data);
+    const uniqueEntities = [...new Set(res.data.map(c => c.entity).filter(Boolean))];
+    setEntities(uniqueEntities);
   };
 
   useEffect(() => { if (tab === 'active') fetchCards(); }, [tab, filters]);
@@ -745,7 +797,7 @@ const CardsManagement = () => {
     try {
       await axios.post(`${API_URL}/cards`, form, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       alert('Cartão emitido!');
-      setForm({ id: '', owner_name: '', price_paid: config.nfcCardPrice });
+      setForm({ id: '', owner_name: '', entity: '', price_paid: config.nfcCardPrice });
       setTab('active');
     } catch (err) { alert(err.response?.data?.error || 'Erro ao emitir'); }
   };
@@ -777,9 +829,14 @@ const CardsManagement = () => {
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-lg shadow-sm border flex gap-4">
              <input placeholder="Filtrar por titular..." className="p-2 border rounded flex-1" value={filters.owner_name} onChange={e => setFilters({...filters, owner_name: e.target.value})} />
+             <select className="p-2 border rounded" value={filters.entity} onChange={e => setFilters({...filters, entity: e.target.value})}>
+                <option value="">Todas Entidades</option>
+                {entities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
+             </select>
              <select className="p-2 border rounded" value={filters.is_active} onChange={e => setFilters({...filters, is_active: e.target.value})}>
                 <option value="1">Activos</option>
                 <option value="0">Cancelados</option>
+                <option value="">Todos</option>
              </select>
           </div>
 
@@ -787,16 +844,17 @@ const CardsManagement = () => {
             <div className="lg:col-span-2 bg-white border rounded-xl shadow-sm overflow-hidden">
                <table className="w-full text-sm text-left">
                   <thead className="bg-gray-50 border-b text-[10px] uppercase font-black text-gray-500">
-                    <tr><th className="p-4">UID / Titular</th><th className="p-4">Saldo</th><th className="p-4">Criado em</th><th className="p-4">Estado</th><th className="p-4">Acções</th></tr>
+                    <tr><th className="p-4">UID / Titular</th><th className="p-4">Entidade</th><th className="p-4">Saldo</th><th className="p-4">Criado em</th><th className="p-4">Estado</th><th className="p-4">Acções</th></tr>
                   </thead>
                   <tbody>
                     {cards.map(c => (
-                      <tr key={c.id} className="border-b">
+                      <tr key={c.id} className="border-b hover:bg-gray-50 transition">
                         <td className="p-4">
                           <p className="font-mono text-[10px] text-gray-400">{c.id}</p>
                           <p className="font-bold">{c.owner_name || 'N/A'}</p>
                         </td>
-                        <td className="p-4 font-black text-blue-600">{c.balance.toFixed(2)}</td>
+                        <td className="p-4 text-xs font-bold text-gray-400">{c.entity || '-'}</td>
+                        <td className="p-4 font-black text-blue-600">{(c.balance ?? 0).toFixed(2)}</td>
                         <td className="p-4 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
                         <td className="p-4">
                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${c.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{c.is_active ? 'ACTIVO' : 'CANCELADO'}</span>
@@ -835,6 +893,10 @@ const CardsManagement = () => {
               <div className="flex flex-col gap-1">
                  <label className="text-xs font-bold uppercase text-gray-400">Nome do Titular</label>
                  <input className="p-3 border rounded-lg" value={form.owner_name} onChange={e => setForm({...form, owner_name: e.target.value})} required />
+              </div>
+              <div className="flex flex-col gap-1">
+                 <label className="text-xs font-bold uppercase text-gray-400">Entidade</label>
+                 <input className="p-3 border rounded-lg" value={form.entity} onChange={e => setForm({...form, entity: e.target.value})} placeholder="Ex: Logística, Empresa XYZ" />
               </div>
               <div className="flex flex-col gap-1">
                  <label className="text-xs font-bold uppercase text-gray-400">Preço Pago (AOA)</label>

@@ -208,7 +208,7 @@ app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), as
 
 // --- Cartões (Admin e Financeiro) ---
 app.get('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const { owner_name, is_active } = req.query;
+  const { owner_name, is_active, entity } = req.query;
   let query = 'SELECT * FROM cards WHERE 1=1';
   const params = [];
 
@@ -216,9 +216,13 @@ app.get('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro'])
     query += ' AND owner_name LIKE ?';
     params.push(`%${owner_name}%`);
   }
-  if (is_active !== undefined) {
+  if (is_active !== undefined && is_active !== '') {
     query += ' AND is_active = ?';
     params.push(is_active);
+  }
+  if (entity) {
+    query += ' AND entity = ?';
+    params.push(entity);
   }
 
   const cards = await db.all(query, params);
@@ -233,14 +237,14 @@ app.get('/api/cards/:id', authenticateToken, authorizeRoles(['admin', 'financeir
 });
 
 app.post('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const { id, owner_name, price_paid } = req.body;
+  const { id, owner_name, entity, price_paid } = req.body;
   try {
     await db.run(
-      'INSERT INTO cards (id, owner_name, price_paid, balance, is_active) VALUES (?, ?, ?, 0, 1)',
-      [id, owner_name, price_paid]
+      'INSERT INTO cards (id, owner_name, entity, price_paid, balance, is_active) VALUES (?, ?, ?, ?, 0, 1)',
+      [id, owner_name, entity, price_paid]
     );
     await logAction(req, 'ISSUE_CARD', 'card', id, `Emissão de cartão para ${owner_name}`);
-    res.status(201).json({ id, owner_name, price_paid });
+    res.status(201).json({ id, owner_name, entity, price_paid });
   } catch (err) {
     res.status(400).json({ error: 'Erro ao emitir cartão (UID duplicado?)' });
   }
@@ -446,6 +450,26 @@ app.get('/api/audit-logs', authenticateToken, authorizeRoles(['admin']), async (
     total: total.count,
     pages: Math.ceil(total.count / limit)
   });
+});
+
+app.get('/api/reports/recharges', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const { dateFrom, dateTo, userId, entity } = req.query;
+  let query = `
+    SELECT al.timestamp, al.entity_id as card_id, c.owner_name, al.amount, al.username, c.entity
+    FROM audit_logs al
+    JOIN cards c ON al.entity_id = c.id
+    WHERE al.action IN ('RECHARGE', 'CREATE_RECHARGE')
+  `;
+  const params = [];
+
+  if (dateFrom) { query += ' AND al.timestamp >= ?'; params.push(dateFrom); }
+  if (dateTo) { query += ' AND al.timestamp <= ?'; params.push(dateTo + ' 23:59:59'); }
+  if (userId) { query += ' AND al.user_id = ?'; params.push(userId); }
+  if (entity) { query += ' AND c.entity = ?'; params.push(entity); }
+
+  query += ' ORDER BY al.timestamp DESC';
+  const recharges = await db.all(query, params);
+  res.json(recharges);
 });
 
 app.get('/api/settings', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
