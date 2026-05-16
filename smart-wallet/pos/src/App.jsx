@@ -105,7 +105,7 @@ const POS = () => {
               disabled={p.stock_quantity <= 0}
               className={`bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition transform active:scale-95 text-left flex flex-col ${p.stock_quantity <= 0 ? 'opacity-50 grayscale border-gray-200' : 'hover:border-blue-500 border-transparent'}`}
             >
-              {p.image_base64 ? <img src={p.image_base64} className="h-32 w-full object-cover" /> : <div className="h-32 bg-gray-100 flex items-center justify-center text-gray-300 font-bold uppercase text-xs">Sem Imagem</div>}
+              {p.image_base64 ? <img src={p.image_base64} className="h-32 w-full object-cover" /> : <div className="h-32 bg-gray-100 flex items-center justify-center text-gray-300 font-bold uppercase text-[10px] text-center px-4">Sem Imagem</div>}
               <div className="p-4 flex-1">
                 <h4 className="font-bold text-gray-800 mb-1 leading-tight">{p.name}</h4>
                 <p className="text-blue-600 font-black text-lg">{p.price.toFixed(2)} un.</p>

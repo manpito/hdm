@@ -83,8 +83,9 @@ const Layout = ({ children }) => {
     { label: 'Utilizadores', icon: <Users size={20}/>, path: '/users', roles: ['admin'] },
     { label: 'Terminais', icon: <Monitor size={20}/>, path: '/terminals', roles: ['admin'] },
     { label: 'Stock', icon: <Package size={20}/>, path: '/stock', roles: ['admin'] },
-    { label: 'Cartões', icon: <CreditCard size={20}/>, path: '/recharge', roles: ['admin', 'financeiro'] },
+    { label: 'Cartões', icon: <CreditCard size={20}/>, path: '/cards', roles: ['admin', 'financeiro'] },
     { label: 'Relatórios', icon: <BarChart3 size={20}/>, path: '/reports', roles: ['admin', 'financeiro'] },
+    { label: 'Logs', icon: <Search size={20}/>, path: '/logs', roles: ['admin'] },
     { label: 'Definições', icon: <Settings size={20}/>, path: '/settings', roles: ['admin'] },
   ];
 
@@ -119,30 +120,57 @@ const Layout = ({ children }) => {
 // --- Components (Mock/Simplified for demo brevity) ---
 const Dashboard = () => {
   const [data, setData] = React.useState(null);
+  const [recon, setRecon] = React.useState(null);
+
+  const fetchData = () => {
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    axios.get(`${API_URL}/reports/dashboard`, config).then(res => setData(res.data));
+    axios.get(`${API_URL}/reports/reconciliation`, config).then(res => setRecon(res.data));
+  };
+
   React.useEffect(() => {
-    axios.get(`${API_URL}/reports/dashboard`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-      .then(res => setData(res.data));
+    fetchData();
+    const interval = setInterval(fetchData, 60000);
+    return () => clearInterval(interval);
   }, []);
 
-  if (!data) return <div>Carregando...</div>;
+  if (!data || !recon) return <div>Carregando...</div>;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-      <div className="bg-white p-6 rounded shadow-sm border-l-4 border-blue-600">
-        <p className="text-xs uppercase text-gray-500 font-bold mb-1">Vendas Hoje</p>
-        <p className="text-2xl font-bold">{data.salesToday.toFixed(2)}</p>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white p-6 rounded shadow-sm border-l-4 border-blue-600">
+          <p className="text-xs uppercase text-gray-500 font-bold mb-1">Vendas Hoje</p>
+          <p className="text-2xl font-bold">{data.salesToday.toFixed(2)}</p>
+        </div>
+        <div className="bg-white p-6 rounded shadow-sm border-l-4 border-orange-500">
+          <p className="text-xs uppercase text-gray-500 font-bold mb-1">Alertas Stock</p>
+          <p className="text-2xl font-bold">{data.lowStock}</p>
+        </div>
+        <div className="bg-white p-6 rounded shadow-sm border-l-4 border-green-500">
+          <p className="text-xs uppercase text-gray-500 font-bold mb-1">POS Ativos</p>
+          <p className="text-2xl font-bold">{data.activeTerminals}/{data.maxTerminals}</p>
+        </div>
+        <div className="bg-white p-6 rounded shadow-sm border-l-4 border-purple-500">
+          <p className="text-xs uppercase text-gray-500 font-bold mb-1">Cartões Carregados</p>
+          <p className="text-2xl font-bold">{data.rechargeToday}</p>
+        </div>
       </div>
-      <div className="bg-white p-6 rounded shadow-sm border-l-4 border-orange-500">
-        <p className="text-xs uppercase text-gray-500 font-bold mb-1">Alertas Stock</p>
-        <p className="text-2xl font-bold">{data.lowStock}</p>
-      </div>
-      <div className="bg-white p-6 rounded shadow-sm border-l-4 border-green-500">
-        <p className="text-xs uppercase text-gray-500 font-bold mb-1">POS Ativos</p>
-        <p className="text-2xl font-bold">{data.activeTerminals}/{data.maxTerminals}</p>
-      </div>
-      <div className="bg-white p-6 rounded shadow-sm border-l-4 border-purple-500">
-        <p className="text-xs uppercase text-gray-500 font-bold mb-1">Cartões Carregados</p>
-        <p className="text-2xl font-bold">{data.rechargeToday}</p>
+
+      <div className={`p-6 rounded-xl border flex items-center justify-between ${recon.isBalanced ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+         <div className="flex items-center gap-4">
+            <div className={`p-3 rounded-full ${recon.isBalanced ? 'bg-green-500' : 'bg-red-500'} text-white`}>
+               <CreditCard size={24} />
+            </div>
+            <div>
+               <h3 className="font-black text-lg uppercase tracking-tighter">Reconciliação Financeira</h3>
+               <p className="text-sm opacity-70">{recon.isBalanced ? 'O sistema está equilibrado.' : `Discrepância detectada no balanço de unidades.`}</p>
+            </div>
+         </div>
+         <div className="text-right">
+            <p className="text-xs font-bold uppercase opacity-50">Diferença</p>
+            <p className={`text-3xl font-black ${recon.isBalanced ? 'text-green-600' : 'text-red-600'}`}>{recon.discrepancy.toFixed(2)} un.</p>
+         </div>
       </div>
     </div>
   );
@@ -281,7 +309,7 @@ const TerminalsManagement = () => {
 // --- Stock Management ---
 const StockManagement = () => {
   const [products, setProducts] = useState([]);
-  const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, image_base64: '' });
+  const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' });
   const [editingId, setEditingId] = useState(null);
 
   const fetchStock = () => {
@@ -292,6 +320,7 @@ const StockManagement = () => {
   const handleImage = (e) => {
     const file = e.target.files[0];
     if (file) {
+      if (file.size > 2 * 1024 * 1024) { alert('Imagem muito grande (máx 2MB)'); return; }
       const reader = new FileReader();
       reader.onloadend = () => setForm({ ...form, image_base64: reader.result });
       reader.readAsDataURL(file);
@@ -301,36 +330,59 @@ const StockManagement = () => {
   const saveProduct = async (e) => {
     e.preventDefault();
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
-    if (editingId) await axios.put(`${API_URL}/products/${editingId}`, form, config);
-    else await axios.post(`${API_URL}/products`, form, config);
+    const payload = { ...form, price: Number(form.price), stock_quantity: Number(form.stock_quantity), stock_minimum: Number(form.stock_minimum) };
+    if (editingId) await axios.put(`${API_URL}/products/${editingId}`, payload, config);
+    else await axios.post(`${API_URL}/products`, payload, config);
     setEditingId(null);
-    setForm({ name: '', price: '', stock_quantity: 0, image_base64: '' });
+    setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' });
     fetchStock();
   };
 
   return (
     <div className="space-y-6">
-      <form onSubmit={saveProduct} className="bg-white p-6 rounded shadow-sm border grid grid-cols-3 gap-4">
-        <input placeholder="Nome" className="p-2 border rounded" value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
-        <input placeholder="Preço" type="number" step="0.1" className="p-2 border rounded" value={form.price} onChange={e => setForm({...form, price: e.target.value})} />
-        <input placeholder="Stock" type="number" className="p-2 border rounded" value={form.stock_quantity} onChange={e => setForm({...form, stock_quantity: e.target.value})} />
-        <div className="col-span-3">
-          <input type="file" onChange={handleImage} className="text-sm" />
-          {form.image_base64 && <img src={form.image_base64} className="h-16 mt-2 rounded" />}
+      <form onSubmit={saveProduct} className="bg-white p-6 rounded shadow-sm border grid grid-cols-4 gap-4">
+        <h3 className="col-span-4 font-bold border-b pb-2">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
+        <input placeholder="Nome" className="p-2 border rounded col-span-2" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
+        <input placeholder="Preço (un.)" type="number" step="0.01" className="p-2 border rounded" value={form.price} onChange={e => setForm({...form, price: e.target.value})} required />
+        <input placeholder="Stock Inicial" type="number" className="p-2 border rounded" value={form.stock_quantity} onChange={e => setForm({...form, stock_quantity: e.target.value})} required />
+        <div className="col-span-2 flex flex-col gap-1">
+          <label className="text-xs text-gray-500 font-bold uppercase">Stock Mínimo (Alerta)</label>
+          <input placeholder="Stock Mínimo" type="number" className="p-2 border rounded w-full" value={form.stock_minimum} onChange={e => setForm({...form, stock_minimum: e.target.value})} required />
         </div>
-        <button className="bg-blue-600 text-white p-2 rounded font-bold col-span-3">Guardar Produto</button>
+        <div className="col-span-2 flex flex-col gap-1">
+          <label className="text-xs text-gray-500 font-bold uppercase">Imagem do Produto</label>
+          <input type="file" accept="image/*" onChange={handleImage} className="text-sm" />
+        </div>
+        {form.image_base64 && (
+          <div className="col-span-4 flex items-center gap-4 bg-gray-50 p-2 rounded border border-dashed">
+            <img src={form.image_base64} className="h-20 w-20 object-cover rounded shadow-sm bg-white" />
+            <button type="button" onClick={() => setForm({...form, image_base64: ''})} className="text-red-500 text-xs font-bold hover:underline">Remover Imagem</button>
+          </div>
+        )}
+        <button className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-bold col-span-4 transition shadow-md">
+          {editingId ? 'Atualizar Produto' : 'Criar Produto'}
+        </button>
+        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' })}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
       </form>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {products.map(p => (
-          <div key={p.id} className="bg-white p-4 border rounded shadow-sm flex gap-4">
-            {p.image_base64 ? <img src={p.image_base64} className="w-16 h-16 object-cover rounded" /> : <div className="w-16 h-16 bg-gray-200 rounded"/>}
-            <div className="flex-1">
-              <h4 className="font-bold">{p.name}</h4>
-              <p className="text-sm text-gray-500">{p.price} un.</p>
-              <p className={`text-xs font-bold ${p.stock_quantity < 10 ? 'text-red-500' : 'text-green-500'}`}>Stock: {p.stock_quantity}</p>
+          <div key={p.id} className="bg-white p-4 border rounded-xl shadow-sm flex gap-4 items-center hover:shadow-md transition">
+            <div className="relative">
+              {p.image_base64 ? <img src={p.image_base64} className="w-20 h-20 object-cover rounded-lg border" /> : <div className="w-20 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-gray-300 text-[10px] text-center px-1 font-bold">SEM IMAGEM</div>}
+              {p.stock_quantity < p.stock_minimum && <div className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"><AlertTriangle size={12}/></div>}
             </div>
-            <button onClick={() => {setEditingId(p.id); setForm(p)}} className="text-blue-600"><Edit size={16}/></button>
+            <div className="flex-1">
+              <h4 className="font-bold text-gray-800 leading-tight">{p.name}</h4>
+              <p className="text-blue-600 font-black">{Number(p.price).toFixed(2)} <span className="text-[10px] uppercase">un.</span></p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.stock_quantity < p.stock_minimum ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                  Stock: {p.stock_quantity}
+                </span>
+                <span className="text-[10px] text-gray-400 font-medium">Mín: {p.stock_minimum}</span>
+              </div>
+            </div>
+            <button onClick={() => {setEditingId(p.id); setForm(p)}} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition"><Edit size={18}/></button>
           </div>
         ))}
       </div>
@@ -340,112 +392,201 @@ const StockManagement = () => {
 
 // --- Reports ---
 const Reports = () => {
-  const [tab, setTab] = useState('general');
+  const [tab, setTab] = useState('vendas_gerais');
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', terminalId: '', productId: '', cardId: '' });
+  const [terminals, setTerminals] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [cardData, setCardData] = useState(null);
 
   useEffect(() => {
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    axios.get(`${API_URL}/terminals`, config).then(res => setTerminals(res.data));
+    axios.get(`${API_URL}/products`, config).then(res => setProducts(res.data));
+  }, []);
+
+  const fetchData = async () => {
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params: filters };
     setLoading(true);
-    const endpoints = { general: 'sales-general', products: 'sales-by-product', stock: '../products' };
-    axios.get(`${API_URL}/reports/${endpoints[tab]}`, config)
-      .then(res => { setData(res.data); setLoading(false); });
-  }, [tab]);
+    try {
+      let res;
+      if (tab === 'vendas_gerais') res = await axios.get(`${API_URL}/reports/sales-general`, config);
+      else if (tab === 'por_produto') res = await axios.get(`${API_URL}/reports/sales-by-product`, config);
+      else if (tab === 'extrato_cartao') {
+        if (!filters.cardId) { setData([]); setCardData(null); setLoading(false); return; }
+        res = await axios.get(`${API_URL}/reports/card-statement`, config);
+        setCardData(res.data.card);
+        res.data = res.data.sales;
+      }
+      else if (tab === 'stock') res = await axios.get(`${API_URL}/products`, config);
+      setData(res.data);
+    } catch (e) { alert('Erro ao carregar dados'); }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, [tab]);
 
   const exportPDF = () => {
     const doc = new jsPDF();
-    doc.text(`Relatorio SmartWallet - ${tab}`, 14, 15);
+    doc.text(`Relatório SmartWallet - ${tab.replace('_', ' ').toUpperCase()}`, 14, 15);
     let headers, body;
-    if (tab === 'general') {
+    if (tab === 'vendas_gerais' || tab === 'extrato_cartao') {
       headers = [['Data', 'Produto', 'Terminal', 'Cartão (UID)', 'Total (un.)']];
       body = data.map(i => [new Date(i.timestamp).toLocaleString(), i.product_name, i.terminal_name || 'N/A', i.card_id, i.total_price.toFixed(2)]);
-    } else if (tab === 'products') {
-      headers = [['Nome', 'Quantidade Vendida', 'Total em Unidades']];
+    } else if (tab === 'por_produto') {
+      headers = [['Nome', 'Qtd Total Vendida', 'Total em Unidades']];
       body = data.map(i => [i.name, i.quantity, i.total.toFixed(2)]);
-    } else {
-      headers = [['Nome', 'Preço', 'Quantidade Disponível']];
-      body = data.map(i => [i.name, i.price.toFixed(2), i.stock_quantity]);
+    } else if (tab === 'stock') {
+      headers = [['Nome', 'Preço', 'Stock Disponível', 'Stock Mínimo']];
+      body = data.map(i => [i.name, i.price.toFixed(2), i.stock_quantity, i.stock_minimum]);
     }
     doc.autoTable({ startY: 20, head: headers, body: body });
     doc.save(`${tab}.pdf`);
   };
 
+  const exportExcel = () => {
+    let exportData;
+    if (tab === 'vendas_gerais' || tab === 'extrato_cartao') {
+      exportData = data.map(i => ({
+        Data: new Date(i.timestamp).toLocaleString(),
+        Produto: i.product_name,
+        Terminal: i.terminal_name || 'N/A',
+        'Cartão (UID)': i.card_id,
+        'Total (un.)': i.total_price
+      }));
+    } else if (tab === 'por_produto') {
+      exportData = data.map(i => ({
+        Nome: i.name,
+        'Qtd Total Vendida': i.quantity,
+        'Total em Unidades': i.total
+      }));
+    } else if (tab === 'stock') {
+      exportData = data.map(i => ({
+        Nome: i.name,
+        Preço: i.price,
+        'Stock Disponível': i.stock_quantity,
+        'Stock Mínimo': i.stock_minimum
+      }));
+    }
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Relatório");
+    XLSX.writeFile(wb, `${tab}.xlsx`);
+  };
+
+  const tabs = [
+    { id: 'vendas_gerais', label: 'Vendas Gerais' },
+    { id: 'por_produto', label: 'Por Produto' },
+    { id: 'extrato_cartao', label: 'Extrato por Cartão' },
+    { id: 'stock', label: 'Stock' }
+  ];
+
   return (
-    <div className="space-y-4">
-      <div className="flex gap-4 border-b">
-        {['general', 'products', 'stock'].map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`pb-2 px-4 font-bold capitalize ${tab === t ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>{t}</button>
+    <div className="space-y-6">
+      <div className="flex gap-4 border-b overflow-x-auto">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={`pb-2 px-4 font-bold whitespace-nowrap ${tab === t.id ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>{t.label}</button>
         ))}
       </div>
-      <div className="flex justify-end gap-2">
-        <button onClick={exportPDF} className="flex items-center gap-1 bg-red-600 text-white px-3 py-1 rounded text-sm"><Download size={14}/> PDF</button>
+
+      <div className="bg-white p-4 rounded-lg shadow-sm border grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+        {(tab !== 'stock') && (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase text-gray-400">De</label>
+              <input type="date" className="p-2 border rounded text-sm" value={filters.dateFrom} onChange={e => setFilters({...filters, dateFrom: e.target.value})} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold uppercase text-gray-400">Até</label>
+              <input type="date" className="p-2 border rounded text-sm" value={filters.dateTo} onChange={e => setFilters({...filters, dateTo: e.target.value})} />
+            </div>
+          </>
+        )}
+        {tab === 'vendas_gerais' && (
+          <>
+            <select className="p-2 border rounded text-sm" value={filters.terminalId} onChange={e => setFilters({...filters, terminalId: e.target.value})}>
+              <option value="">Todos Terminais</option>
+              {terminals.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <select className="p-2 border rounded text-sm" value={filters.productId} onChange={e => setFilters({...filters, productId: e.target.value})}>
+              <option value="">Todos Produtos</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </>
+        )}
+        {tab === 'extrato_cartao' && (
+          <input placeholder="UID do Cartão" className="p-2 border rounded text-sm" value={filters.cardId} onChange={e => setFilters({...filters, cardId: e.target.value})} />
+        )}
+        <div className="flex gap-2 col-span-1">
+          <button onClick={fetchData} className="bg-blue-600 text-white p-2 rounded flex-1 font-bold text-sm">Filtrar</button>
+          <button onClick={exportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center"><Download size={18}/></button>
+          <button onClick={exportExcel} className="bg-green-600 text-white p-2 rounded flex-1 font-bold text-sm">XLS</button>
+        </div>
       </div>
-      <div className="bg-white border rounded shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-gray-500 italic">Carregando dados...</div>
-        ) : (
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 border-b uppercase text-xs font-bold text-gray-600">
-              {tab === 'general' && (
-                <tr>
-                  <th className="p-3">Data</th>
-                  <th className="p-3">Produto</th>
-                  <th className="p-3">Terminal</th>
-                  <th className="p-3">Cartão (UID)</th>
-                  <th className="p-3">Total (un.)</th>
-                </tr>
-              )}
-              {tab === 'products' && (
-                <tr>
-                  <th className="p-3">Nome do Produto</th>
-                  <th className="p-3">Qtd Vendida</th>
-                  <th className="p-3">Total (un.)</th>
-                </tr>
-              )}
-              {tab === 'stock' && (
-                <tr>
-                  <th className="p-3">Nome</th>
-                  <th className="p-3">Preço</th>
-                  <th className="p-3">Stock Disponível</th>
-                </tr>
-              )}
-            </thead>
-            <tbody>
-              {data.map((item, idx) => (
-                <tr key={idx} className="border-b hover:bg-gray-50">
-                  {tab === 'general' && (
+
+      {tab === 'extrato_cartao' && cardData && (
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 flex justify-between items-center">
+           <div>
+              <p className="text-xs text-blue-600 font-bold uppercase">Titular</p>
+              <h3 className="text-xl font-black">{cardData.owner_name || 'Desconhecido'}</h3>
+           </div>
+           <div className="text-right">
+              <p className="text-xs text-blue-600 font-bold uppercase">Saldo Atual</p>
+              <h3 className="text-2xl font-black text-blue-900">{cardData.balance.toFixed(2)} un.</h3>
+           </div>
+        </div>
+      )}
+
+      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-gray-50 border-b uppercase text-[10px] font-black text-gray-500">
+            {(tab === 'vendas_gerais' || tab === 'extrato_cartao') && (
+              <tr><th className="p-4">Data/Hora</th><th className="p-4">Produto</th><th className="p-4">Terminal</th><th className="p-4">UID Cartão</th><th className="p-4 text-right">Total</th></tr>
+            )}
+            {tab === 'por_produto' && (
+              <tr><th className="p-4">Nome do Produto</th><th className="p-4">Qtd Vendida</th><th className="p-4 text-right">Total (un.)</th></tr>
+            )}
+            {tab === 'stock' && (
+              <tr><th className="p-4">Nome</th><th className="p-4">Preço</th><th className="p-4">Stock Disp.</th><th className="p-4">Stock Mín.</th></tr>
+            )}
+          </thead>
+          <tbody>
+            {loading ? <tr><td colSpan="5" className="p-10 text-center italic text-gray-400">Carregando dados...</td></tr> : (
+              data.map((item, idx) => (
+                <tr key={idx} className="border-b hover:bg-gray-50 transition">
+                  {(tab === 'vendas_gerais' || tab === 'extrato_cartao') && (
                     <>
-                      <td className="p-3 whitespace-nowrap">{new Date(item.timestamp).toLocaleString()}</td>
-                      <td className="p-3 font-bold">{item.product_name}</td>
-                      <td className="p-3">{item.terminal_name || <span className="text-gray-400 italic">Central</span>}</td>
-                      <td className="p-3 font-mono text-xs">{item.card_id}</td>
-                      <td className="p-3 font-bold text-blue-600">{item.total_price.toFixed(2)}</td>
+                      <td className="p-4 whitespace-nowrap">{new Date(item.timestamp).toLocaleString()}</td>
+                      <td className="p-4 font-bold">{item.product_name}</td>
+                      <td className="p-4 text-gray-500">{item.terminal_name || 'Central'}</td>
+                      <td className="p-4 font-mono text-[10px]">{item.card_id}</td>
+                      <td className="p-4 text-right font-black text-blue-600">{item.total_price.toFixed(2)}</td>
                     </>
                   )}
-                  {tab === 'products' && (
+                  {tab === 'por_produto' && (
                     <>
-                      <td className="p-3 font-bold">{item.name}</td>
-                      <td className="p-3">{item.quantity}</td>
-                      <td className="p-3 font-bold text-blue-600">{item.total.toFixed(2)}</td>
+                      <td className="p-4 font-bold">{item.name}</td>
+                      <td className="p-4">{item.quantity}</td>
+                      <td className="p-4 text-right font-black text-blue-600">{item.total.toFixed(2)}</td>
                     </>
                   )}
                   {tab === 'stock' && (
                     <>
-                      <td className="p-3 font-bold">{item.name}</td>
-                      <td className="p-3">{item.price.toFixed(2)}</td>
-                      <td className={`p-3 font-bold ${item.stock_quantity < 10 ? 'text-red-600' : 'text-green-600'}`}>{item.stock_quantity}</td>
+                      <td className="p-4 font-bold">{item.name}</td>
+                      <td className="p-4 font-medium text-gray-600">{item.price.toFixed(2)}</td>
+                      <td className={`p-4 font-black ${item.stock_quantity < item.stock_minimum ? 'text-red-600' : 'text-green-600'}`}>{item.stock_quantity}</td>
+                      <td className="p-4 text-gray-400 font-bold">{item.stock_minimum}</td>
                     </>
                   )}
                 </tr>
-              ))}
-              {data.length === 0 && (
-                <tr>
-                  <td colSpan="5" className="p-8 text-center text-gray-400 italic">Nenhuns dados encontrados para este relatório.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
+              ))
+            )}
+            {!loading && data.length === 0 && (
+              <tr><td colSpan="5" className="p-10 text-center italic text-gray-400">Nenhuns dados encontrados.</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -453,41 +594,257 @@ const Reports = () => {
 
 const SettingsPage = () => {
   const [config, setConfig] = useState(null);
+  const [form, setForm] = useState({});
+
   useEffect(() => {
-    axios.get(`${API_URL}/settings`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => setConfig(res.data));
+    axios.get(`${API_URL}/settings`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(res => { setConfig(res.data); setForm(res.data); });
   }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    await axios.put(`${API_URL}/settings`, form, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+    alert('Definições atualizadas!');
+  };
+
   if (!config) return <div>Carregando...</div>;
+
   return (
-    <div className="bg-white p-6 border rounded shadow-sm max-w-lg space-y-4">
-      <div><label className="text-sm text-gray-500">Nome da Instalação</label><p className="font-bold">{config.installationName}</p></div>
-      <div><label className="text-sm text-gray-500">Threshold Alerta Stock</label><p className="font-bold">{config.stockThreshold}</p></div>
-      <div><label className="text-sm text-gray-500">Limite Terminais POS (MAX_POS_TERMINALS)</label><p className="font-bold text-blue-600">{config.maxPosTerminals}</p></div>
+    <form onSubmit={handleSave} className="bg-white p-8 border rounded-xl shadow-sm max-w-2xl space-y-6">
+      <h3 className="text-xl font-black border-b pb-4">Definições do Sistema</h3>
+
+      <div className="grid grid-cols-2 gap-6">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-bold uppercase text-gray-400">Nome da Instalação</label>
+          <input className="p-3 border rounded-lg font-bold" value={form.installationName} onChange={e => setForm({...form, installationName: e.target.value})} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-bold uppercase text-gray-400">Preço Base Cartão NFC (AOA)</label>
+          <input type="number" className="p-3 border rounded-lg font-bold" value={form.nfcCardPrice} onChange={e => setForm({...form, nfcCardPrice: e.target.value})} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-bold uppercase text-gray-400">Stock Threshold Global</label>
+          <input type="number" className="p-3 border rounded-lg font-bold" value={form.stockThreshold} onChange={e => setForm({...form, stockThreshold: e.target.value})} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-bold uppercase text-gray-400">Máximo Terminais POS (Somente Leitura)</label>
+          <input className="p-3 border rounded-lg bg-gray-50 font-bold text-gray-400" value={form.maxPosTerminals} disabled />
+        </div>
+      </div>
+
+      <button className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-md">Guardar Alterações</button>
+    </form>
+  );
+};
+
+const AuditLogs = () => {
+  const [data, setData] = useState({ logs: [], total: 0, pages: 1 });
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', username: '', action: '' });
+
+  const fetchLogs = async () => {
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params: { ...filters, page } };
+    const res = await axios.get(`${API_URL}/audit-logs`, config);
+    setData(res.data);
+  };
+
+  useEffect(() => { fetchLogs(); }, [page]);
+
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    doc.text("Logs de Auditoria", 14, 15);
+    const headers = [['Data', 'Utilizador', 'Acção', 'Entidade', 'Detalhes']];
+    const body = data.logs.map(l => [new Date(l.timestamp).toLocaleString(), l.username, l.action, l.entity, l.details]);
+    doc.autoTable({ startY: 20, head: headers, body: body });
+    doc.save("audit_logs.pdf");
+  };
+
+  const exportExcel = () => {
+    const exportData = data.logs.map(l => ({
+      Data: new Date(l.timestamp).toLocaleString(),
+      Utilizador: l.username,
+      Acção: l.action,
+      Entidade: l.entity,
+      Detalhes: l.details
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Logs");
+    XLSX.writeFile(wb, "audit_logs.xlsx");
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white p-4 rounded-lg shadow-sm border grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+         <input type="date" className="p-2 border rounded text-sm" value={filters.dateFrom} onChange={e => setFilters({...filters, dateFrom: e.target.value})} />
+         <input type="date" className="p-2 border rounded text-sm" value={filters.dateTo} onChange={e => setFilters({...filters, dateTo: e.target.value})} />
+         <input placeholder="Utilizador" className="p-2 border rounded text-sm" value={filters.username} onChange={e => setFilters({...filters, username: e.target.value})} />
+         <input placeholder="Acção" className="p-2 border rounded text-sm" value={filters.action} onChange={e => setFilters({...filters, action: e.target.value})} />
+         <div className="flex gap-2">
+            <button onClick={() => { setPage(1); fetchLogs(); }} className="bg-blue-600 text-white p-2 rounded flex-1 font-bold">Filtrar</button>
+            <button onClick={exportPDF} className="bg-red-600 text-white p-2 rounded flex-1 flex justify-center items-center"><Download size={18}/></button>
+            <button onClick={exportExcel} className="bg-green-600 text-white p-2 rounded flex-1 font-bold text-sm">XLS</button>
+         </div>
+      </div>
+
+      <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+        <table className="w-full text-sm text-left">
+          <thead className="bg-gray-50 border-b text-[10px] font-black text-gray-500 uppercase">
+            <tr><th className="p-4">Data/Hora</th><th className="p-4">Utilizador</th><th className="p-4">Acção</th><th className="p-4">Entidade</th><th className="p-4">Detalhes</th></tr>
+          </thead>
+          <tbody>
+            {data.logs.map(l => (
+              <tr key={l.id} className="border-b hover:bg-gray-50 transition">
+                <td className="p-4 whitespace-nowrap text-xs">{new Date(l.timestamp).toLocaleString()}</td>
+                <td className="p-4 font-bold">{l.username}</td>
+                <td className="p-4"><span className="px-2 py-0.5 bg-gray-100 rounded text-[10px] font-black">{l.action}</span></td>
+                <td className="p-4 text-xs font-bold text-gray-400">{l.entity}</td>
+                <td className="p-4 text-xs">{l.details}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex justify-center gap-2">
+        {Array.from({ length: data.pages }, (_, i) => i + 1).map(p => (
+          <button key={p} onClick={() => setPage(p)} className={`px-4 py-2 rounded font-bold ${page === p ? 'bg-blue-600 text-white' : 'bg-white border'}`}>{p}</button>
+        ))}
+      </div>
     </div>
   );
 };
 
-const CardRecharge = () => {
-  const [cardId, setCardId] = useState('');
-  const [amount, setAmount] = useState('');
-  const [msg, setMsg] = useState('');
+const CardsManagement = () => {
+  const [tab, setTab] = useState('active');
+  const [cards, setCards] = useState([]);
+  const [filters, setFilters] = useState({ owner_name: '', is_active: 1 });
+  const [form, setForm] = useState({ id: '', owner_name: '', price_paid: '' });
+  const [recharge, setRecharge] = useState({ id: '', amount: '' });
+  const [config, setConfig] = useState({});
+
+  useEffect(() => {
+    const fetchConfig = async () => {
+      const res = await axios.get(`${API_URL}/settings`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      setConfig(res.data);
+      setForm(f => ({ ...f, price_paid: res.data.nfcCardPrice }));
+    };
+    fetchConfig();
+  }, []);
+
+  const fetchCards = async () => {
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params: filters };
+    const res = await axios.get(`${API_URL}/cards`, config);
+    setCards(res.data);
+  };
+
+  useEffect(() => { if (tab === 'active') fetchCards(); }, [tab, filters]);
+
+  const handleIssue = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post(`${API_URL}/cards`, form, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      alert('Cartão emitido!');
+      setForm({ id: '', owner_name: '', price_paid: config.nfcCardPrice });
+      setTab('active');
+    } catch (err) { alert(err.response?.data?.error || 'Erro ao emitir'); }
+  };
+
+  const handleCancel = async (id) => {
+    if (!confirm('Tem a certeza que deseja cancelar este cartão? O saldo será perdido.')) return;
+    await axios.put(`${API_URL}/cards/${id}/cancel`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+    fetchCards();
+  };
 
   const handleRecharge = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/cards/recharge`, { id: cardId, amount: Number(amount) }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-      setMsg('Carregado com sucesso!');
-      setCardId(''); setAmount('');
-    } catch (err) { setMsg('Erro no carregamento'); }
+      await axios.post(`${API_URL}/cards/recharge`, recharge, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      alert('Carregado!');
+      setRecharge({ id: '', amount: '' });
+      fetchCards();
+    } catch (err) { alert('Erro no carregamento'); }
   };
 
   return (
-    <form onSubmit={handleRecharge} className="bg-white p-6 border rounded shadow-sm max-w-md space-y-4">
-      <h3 className="font-bold">Carregamento de Cartão</h3>
-      {msg && <div className="p-2 bg-blue-50 text-blue-700 text-sm">{msg}</div>}
-      <input placeholder="ID Cartão (NFC)" className="w-full p-2 border rounded" value={cardId} onChange={e => setCardId(e.target.value)} required />
-      <input placeholder="Valor em Unidades" type="number" className="w-full p-2 border rounded" value={amount} onChange={e => setAmount(e.target.value)} required />
-      <button className="w-full bg-blue-600 text-white py-2 rounded font-bold">Carregar</button>
-    </form>
+    <div className="space-y-6">
+      <div className="flex gap-4 border-b">
+        <button onClick={() => setTab('active')} className={`pb-2 px-4 font-bold ${tab === 'active' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Cartões Activos</button>
+        <button onClick={() => setTab('issue')} className={`pb-2 px-4 font-bold ${tab === 'issue' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Emissão de Cartão</button>
+      </div>
+
+      {tab === 'active' ? (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-lg shadow-sm border flex gap-4">
+             <input placeholder="Filtrar por titular..." className="p-2 border rounded flex-1" value={filters.owner_name} onChange={e => setFilters({...filters, owner_name: e.target.value})} />
+             <select className="p-2 border rounded" value={filters.is_active} onChange={e => setFilters({...filters, is_active: e.target.value})}>
+                <option value="1">Activos</option>
+                <option value="0">Cancelados</option>
+             </select>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white border rounded-xl shadow-sm overflow-hidden">
+               <table className="w-full text-sm text-left">
+                  <thead className="bg-gray-50 border-b text-[10px] uppercase font-black text-gray-500">
+                    <tr><th className="p-4">UID / Titular</th><th className="p-4">Saldo</th><th className="p-4">Criado em</th><th className="p-4">Estado</th><th className="p-4">Acções</th></tr>
+                  </thead>
+                  <tbody>
+                    {cards.map(c => (
+                      <tr key={c.id} className="border-b">
+                        <td className="p-4">
+                          <p className="font-mono text-[10px] text-gray-400">{c.id}</p>
+                          <p className="font-bold">{c.owner_name || 'N/A'}</p>
+                        </td>
+                        <td className="p-4 font-black text-blue-600">{c.balance.toFixed(2)}</td>
+                        <td className="p-4 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
+                        <td className="p-4">
+                           <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${c.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{c.is_active ? 'ACTIVO' : 'CANCELADO'}</span>
+                        </td>
+                        <td className="p-4">
+                           <div className="flex gap-2">
+                             <button onClick={() => setRecharge({...recharge, id: c.id})} className="text-blue-600 text-xs font-bold hover:underline">Carregar</button>
+                             {c.is_active === 1 && <button onClick={() => handleCancel(c.id)} className="text-red-600 text-xs font-bold hover:underline">Cancelar</button>}
+                           </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+               </table>
+            </div>
+
+            <form onSubmit={handleRecharge} className="bg-white p-6 border rounded-xl shadow-sm h-fit space-y-4">
+               <h3 className="font-black uppercase text-gray-400 text-xs border-b pb-2">Carregamento Rápido</h3>
+               <input placeholder="UID Cartão" className="w-full p-3 border rounded-lg bg-gray-50 font-mono" value={recharge.id} onChange={e => setRecharge({...recharge, id: e.target.value})} required />
+               <input placeholder="Valor (un.)" type="number" className="w-full p-3 border rounded-lg font-black text-xl text-blue-600" value={recharge.amount} onChange={e => setRecharge({...recharge, amount: e.target.value})} required />
+               <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">Confirmar Carregamento</button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleIssue} className="bg-white p-8 border rounded-xl shadow-sm max-w-lg mx-auto space-y-6">
+           <div className="text-center border-b pb-4">
+              <h3 className="text-2xl font-black text-blue-900">Emissão de Cartão</h3>
+              <p className="text-gray-500 text-sm">Registe um novo cartão NFC no sistema</p>
+           </div>
+           <div className="space-y-4">
+              <div className="flex flex-col gap-1">
+                 <label className="text-xs font-bold uppercase text-gray-400">UID do Cartão (NFC)</label>
+                 <input className="p-3 border rounded-lg font-mono" value={form.id} onChange={e => setForm({...form, id: e.target.value})} required />
+              </div>
+              <div className="flex flex-col gap-1">
+                 <label className="text-xs font-bold uppercase text-gray-400">Nome do Titular</label>
+                 <input className="p-3 border rounded-lg" value={form.owner_name} onChange={e => setForm({...form, owner_name: e.target.value})} required />
+              </div>
+              <div className="flex flex-col gap-1">
+                 <label className="text-xs font-bold uppercase text-gray-400">Preço Pago (AOA)</label>
+                 <input type="number" className="p-3 border rounded-lg" value={form.price_paid} onChange={e => setForm({...form, price_paid: e.target.value})} required />
+              </div>
+           </div>
+           <button className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg hover:bg-blue-700 transition shadow-lg">EMITIR CARTÃO</button>
+        </form>
+      )}
+    </div>
   );
 };
 
@@ -501,8 +858,9 @@ function App() {
         <Route path="/users" element={<ProtectedRoute allowedRoles={['admin']}><Layout><UsersManagement /></Layout></ProtectedRoute>} />
         <Route path="/terminals" element={<ProtectedRoute allowedRoles={['admin']}><Layout><TerminalsManagement /></Layout></ProtectedRoute>} />
         <Route path="/stock" element={<ProtectedRoute allowedRoles={['admin']}><Layout><StockManagement /></Layout></ProtectedRoute>} />
-        <Route path="/recharge" element={<ProtectedRoute allowedRoles={['admin', 'financeiro']}><Layout><CardRecharge /></Layout></ProtectedRoute>} />
+        <Route path="/cards" element={<ProtectedRoute allowedRoles={['admin', 'financeiro']}><Layout><CardsManagement /></Layout></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute allowedRoles={['admin', 'financeiro']}><Layout><Reports /></Layout></ProtectedRoute>} />
+        <Route path="/logs" element={<ProtectedRoute allowedRoles={['admin']}><Layout><AuditLogs /></Layout></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute allowedRoles={['admin']}><Layout><SettingsPage /></Layout></ProtectedRoute>} />
         <Route path="/" element={<Navigate to="/dashboard" />} />
       </Routes>

@@ -16,6 +16,16 @@ const MAX_POS_TERMINALS = parseInt(process.env.MAX_POS_TERMINALS || '2');
 
 const db = await initDb();
 
+// --- Helper de Auditoria ---
+const logAction = async (req, action, entity, entity_id, details, amount = null) => {
+  const user = req.user;
+  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  await db.run(
+    'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [user.id, user.username, action, entity, entity_id, details, ip, amount]
+  );
+};
+
 // --- Middleware de Autenticação ---
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -74,7 +84,24 @@ app.post('/api/auth/login', async (req, res) => {
     terminal_id: user.terminal_id
   }, JWT_SECRET);
 
+  // Log login (precisamos do IP e User ID, req.user ainda não existe aqui)
+  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  await db.run(
+    'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [user.id, user.username, 'LOGIN_SUCCESS', 'user', user.id, 'Login efetuado com sucesso', ip]
+  );
+
   res.json({ token, user: { username: user.username, role: user.role, full_name: user.full_name } });
+});
+
+app.post('/api/auth/login-fail-log', async (req, res) => {
+  const { username } = req.body;
+  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  await db.run(
+    'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [0, username || 'unknown', 'LOGIN_FAILED', 'auth', null, 'Tentativa de login falhada', ip]
+  );
+  res.status(200).send();
 });
 
 // --- Utilizadores (Apenas Admin) ---
@@ -87,10 +114,11 @@ app.post('/api/users', authenticateToken, authorizeRoles(['admin']), async (req,
   const { username, password, role, full_name, terminal_id } = req.body;
   const hashedPassword = await bcrypt.hash(password, 10);
   try {
-    await db.run(
+    const result = await db.run(
       'INSERT INTO users (username, password, role, full_name, terminal_id, is_active) VALUES (?, ?, ?, ?, ?, 1)',
       [username, hashedPassword, role, full_name, terminal_id]
     );
+    await logAction(req, 'CREATE', 'user', result.lastID, `Criado utilizador: ${username}`);
     res.status(201).json({ message: 'User created' });
   } catch (err) {
     res.status(400).json({ error: 'Username already exists' });
@@ -110,6 +138,7 @@ app.put('/api/users/:id', authenticateToken, authorizeRoles(['admin']), async (r
     'UPDATE users SET full_name = ?, role = ?, terminal_id = ?, is_active = ? WHERE id = ?',
     [full_name, role, terminal_id, is_active, id]
   );
+  await logAction(req, 'UPDATE', 'user', id, `Editado utilizador: ${full_name}`);
   res.json({ message: 'User updated' });
 });
 
@@ -122,6 +151,7 @@ app.get('/api/terminals', authenticateToken, authorizeRoles(['admin']), async (r
 app.post('/api/terminals', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { name, location } = req.body;
   const result = await db.run('INSERT INTO terminals (name, location, is_active) VALUES (?, ?, 1)', [name, location]);
+  await logAction(req, 'CREATE', 'terminal', result.lastID, `Criado terminal: ${name}`);
   res.status(201).json({ id: result.lastID, name, location, is_active: 1 });
 });
 
@@ -137,6 +167,7 @@ app.put('/api/terminals/:id', authenticateToken, authorizeRoles(['admin']), asyn
   }
 
   await db.run('UPDATE terminals SET name = ?, location = ?, is_active = ? WHERE id = ?', [name, location, is_active, id]);
+  await logAction(req, is_active ? 'UPDATE' : 'DEACTIVATE', 'terminal', id, `Terminal ${name} atualizado`);
   res.json({ message: 'Terminal updated' });
 });
 
@@ -147,31 +178,53 @@ app.get('/api/products', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/products', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
-  const { name, price, stock_quantity, image_base64 } = req.body;
+  const { name, price, stock_quantity, image_base64, stock_minimum } = req.body;
   const result = await db.run(
-    'INSERT INTO products (name, price, stock_quantity, image_base64) VALUES (?, ?, ?, ?)',
-    [name, price, stock_quantity, image_base64]
+    'INSERT INTO products (name, price, stock_quantity, image_base64, stock_minimum) VALUES (?, ?, ?, ?, ?)',
+    [name, price, stock_quantity, image_base64, stock_minimum || 5]
   );
+  await logAction(req, 'CREATE', 'product', result.lastID, `Criado produto: ${name}`);
   res.status(201).json({ id: result.lastID, name, price, stock_quantity });
 });
 
 app.put('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { id } = req.params;
-  const { name, price, stock_quantity, image_base64 } = req.body;
+  const { name, price, stock_quantity, image_base64, stock_minimum } = req.body;
   await db.run(
-    'UPDATE products SET name = ?, price = ?, stock_quantity = ?, image_base64 = ? WHERE id = ?',
-    [name, price, stock_quantity, image_base64, id]
+    'UPDATE products SET name = ?, price = ?, stock_quantity = ?, image_base64 = ?, stock_minimum = ? WHERE id = ?',
+    [name, price, stock_quantity, image_base64, stock_minimum, id]
   );
+  await logAction(req, 'UPDATE', 'product', id, `Produto ${name} atualizado`);
   res.json({ id, name, price, stock_quantity });
 });
 
 app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { id } = req.params;
+  const product = await db.get('SELECT name FROM products WHERE id = ?', id);
   await db.run('DELETE FROM products WHERE id = ?', id);
+  await logAction(req, 'DELETE', 'product', id, `Eliminado produto: ${product?.name}`);
   res.status(204).send();
 });
 
 // --- Cartões (Admin e Financeiro) ---
+app.get('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const { owner_name, is_active } = req.query;
+  let query = 'SELECT * FROM cards WHERE 1=1';
+  const params = [];
+
+  if (owner_name) {
+    query += ' AND owner_name LIKE ?';
+    params.push(`%${owner_name}%`);
+  }
+  if (is_active !== undefined) {
+    query += ' AND is_active = ?';
+    params.push(is_active);
+  }
+
+  const cards = await db.all(query, params);
+  res.json(cards);
+});
+
 app.get('/api/cards/:id', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { id } = req.params;
   const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
@@ -179,15 +232,42 @@ app.get('/api/cards/:id', authenticateToken, authorizeRoles(['admin', 'financeir
   else res.status(404).json({ error: 'Cartão não encontrado' });
 });
 
+app.post('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const { id, owner_name, price_paid } = req.body;
+  try {
+    await db.run(
+      'INSERT INTO cards (id, owner_name, price_paid, balance, is_active) VALUES (?, ?, ?, 0, 1)',
+      [id, owner_name, price_paid]
+    );
+    await logAction(req, 'ISSUE_CARD', 'card', id, `Emissão de cartão para ${owner_name}`);
+    res.status(201).json({ id, owner_name, price_paid });
+  } catch (err) {
+    res.status(400).json({ error: 'Erro ao emitir cartão (UID duplicado?)' });
+  }
+});
+
+app.put('/api/cards/:id/cancel', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const { id } = req.params;
+  const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
+  if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
+
+  await db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', id);
+  await logAction(req, 'CANCEL_CARD', 'card', id, `Cartão de ${card.owner_name} cancelado`);
+  res.json({ message: 'Cartão cancelado' });
+});
+
 app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { id, amount } = req.body;
   const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
   if (card) {
     const newBalance = card.balance + amount;
-    await db.run('UPDATE cards SET balance = ? WHERE id = ?', [newBalance, id]);
+    await db.run('UPDATE cards SET balance = ?, is_active = 1 WHERE id = ?', [newBalance, id]);
+    await logAction(req, 'RECHARGE', 'card', id, `Carregamento de ${amount} un.`, amount);
     res.json({ id, balance: newBalance });
   } else {
-    await db.run('INSERT INTO cards (id, balance) VALUES (?, ?)', [id, amount]);
+    // Caso de uso: Carregamento de cartão não emitido previamente (legado ou simplificado)
+    await db.run('INSERT INTO cards (id, balance, is_active) VALUES (?, ?, 1)', [id, amount]);
+    await logAction(req, 'CREATE_RECHARGE', 'card', id, `Novo cartão carregado com ${amount} un.`, amount);
     res.json({ id, balance: amount });
   }
 });
@@ -228,6 +308,7 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
 
     await db.run('UPDATE cards SET balance = balance - ? WHERE id = ?', [totalCartPrice, card_id]);
     await db.run('COMMIT');
+    await logAction(req, 'SALE', 'sale', card_id, `Venda realizada: ${totalCartPrice.toFixed(2)} un. no cartão ${card_id}`, totalCartPrice);
     res.status(201).json({ message: 'Venda realizada com sucesso' });
   } catch (error) {
     await db.run('ROLLBACK');
@@ -238,9 +319,10 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
 // --- Relatórios (Admin e Financeiro) ---
 app.get('/api/reports/dashboard', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const salesToday = await db.get("SELECT SUM(total_price) as total FROM sales WHERE date(timestamp) = date('now')");
-  const lowStock = await db.get("SELECT COUNT(*) as count FROM products WHERE stock_quantity < 10");
+  // Dashboard low stock now checks product-specific threshold
+  const lowStock = await db.get("SELECT COUNT(*) as count FROM products WHERE stock_quantity < stock_minimum");
   const activeTerminals = await db.get("SELECT COUNT(*) as count FROM terminals WHERE is_active = 1");
-  const rechargeToday = await db.get("SELECT COUNT(*) as count FROM cards WHERE balance > 0"); // Simplificado
+  const rechargeToday = await db.get("SELECT COUNT(*) as count FROM cards WHERE date(created_at) = date('now')"); // Emissões hoje (ou usar logs)
 
   res.json({
     salesToday: salesToday.total || 0,
@@ -252,33 +334,137 @@ app.get('/api/reports/dashboard', authenticateToken, authorizeRoles(['admin', 'f
 });
 
 app.get('/api/reports/sales-general', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const sales = await db.all(`
+  const { dateFrom, dateTo, terminalId, productId } = req.query;
+  let query = `
     SELECT s.*, p.name as product_name, t.name as terminal_name
     FROM sales s
     JOIN products p ON s.product_id = p.id
     LEFT JOIN terminals t ON s.terminal_id = t.id
-    ORDER BY s.timestamp DESC
-  `);
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (dateFrom) { query += ' AND s.timestamp >= ?'; params.push(dateFrom); }
+  if (dateTo) { query += ' AND s.timestamp <= ?'; params.push(dateTo + ' 23:59:59'); }
+  if (terminalId) { query += ' AND s.terminal_id = ?'; params.push(terminalId); }
+  if (productId) { query += ' AND s.product_id = ?'; params.push(productId); }
+
+  query += ' ORDER BY s.timestamp DESC';
+  const sales = await db.all(query, params);
   res.json(sales);
 });
 
 app.get('/api/reports/sales-by-product', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const sales = await db.all(`
+  const { dateFrom, dateTo } = req.query;
+  let query = `
     SELECT p.name, SUM(s.quantity) as quantity, SUM(s.total_price) as total
     FROM sales s
     JOIN products p ON s.product_id = p.id
-    GROUP BY p.id
-    ORDER BY total DESC
-  `);
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (dateFrom) { query += ' AND s.timestamp >= ?'; params.push(dateFrom); }
+  if (dateTo) { query += ' AND s.timestamp <= ?'; params.push(dateTo + ' 23:59:59'); }
+
+  query += ' GROUP BY p.id ORDER BY total DESC';
+  const sales = await db.all(query, params);
   res.json(sales);
 });
 
-app.get('/api/settings', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+app.get('/api/reports/card-statement', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const { cardId, dateFrom, dateTo } = req.query;
+  if (!cardId) return res.status(400).json({ error: 'UID do cartão é obrigatório' });
+
+  const card = await db.get('SELECT * FROM cards WHERE id = ?', cardId);
+  if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
+
+  let query = `
+    SELECT s.*, p.name as product_name, t.name as terminal_name
+    FROM sales s
+    JOIN products p ON s.product_id = p.id
+    LEFT JOIN terminals t ON s.terminal_id = t.id
+    WHERE s.card_id = ?
+  `;
+  const params = [cardId];
+
+  if (dateFrom) { query += ' AND s.timestamp >= ?'; params.push(dateFrom); }
+  if (dateTo) { query += ' AND s.timestamp <= ?'; params.push(dateTo + ' 23:59:59'); }
+
+  query += ' ORDER BY s.timestamp DESC';
+  const sales = await db.all(query, params);
+
   res.json({
-    installationName: 'SmartWallet Central',
-    stockThreshold: 10,
-    maxPosTerminals: MAX_POS_TERMINALS
+    card,
+    sales
   });
+});
+
+app.get('/api/reports/reconciliation', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  // Total carregado (Histórico nos audit_logs para RECHARGE e CREATE_RECHARGE usando coluna amount)
+  const recharges = await db.get(`
+    SELECT SUM(amount) as total
+    FROM audit_logs
+    WHERE action IN ('RECHARGE', 'CREATE_RECHARGE')
+  `);
+  // Total vendido
+  const sales = await db.get('SELECT SUM(total_price) as total FROM sales');
+  // Soma dos saldos atuais
+  const balances = await db.get('SELECT SUM(balance) as total FROM cards WHERE is_active = 1');
+
+  const totalRecharged = recharges.total || 0;
+  const totalSold = sales.total || 0;
+  const currentBalances = balances.total || 0;
+  const discrepancy = totalRecharged - (totalSold + currentBalances);
+
+  res.json({
+    totalRecharged,
+    totalSold,
+    currentBalances,
+    discrepancy,
+    isBalanced: Math.abs(discrepancy) < 0.01
+  });
+});
+
+app.get('/api/audit-logs', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+  const { page = 1, limit = 20, dateFrom, dateTo, username, action } = req.query;
+  const offset = (page - 1) * limit;
+
+  let query = 'FROM audit_logs WHERE 1=1';
+  const params = [];
+
+  if (dateFrom) { query += ' AND timestamp >= ?'; params.push(dateFrom); }
+  if (dateTo) { query += ' AND timestamp <= ?'; params.push(dateTo + ' 23:59:59'); }
+  if (username) { query += ' AND username = ?'; params.push(username); }
+  if (action) { query += ' AND action = ?'; params.push(action); }
+
+  const total = await db.get('SELECT COUNT(*) as count ' + query, params);
+  const logs = await db.all('SELECT * ' + query + ' ORDER BY timestamp DESC LIMIT ? OFFSET ?', [...params, limit, offset]);
+
+  res.json({
+    logs,
+    total: total.count,
+    pages: Math.ceil(total.count / limit)
+  });
+});
+
+app.get('/api/settings', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const settings = await db.all('SELECT * FROM settings');
+  const config = {};
+  settings.forEach(s => config[s.key] = s.value);
+  config.maxPosTerminals = MAX_POS_TERMINALS;
+  res.json(config);
+});
+
+app.put('/api/settings', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+  const updates = req.body;
+  for (const [key, value] of Object.entries(updates)) {
+    if (key !== 'maxPosTerminals') { // Protegido via ENV
+      await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]);
+    }
+  }
+  await logAction(req, 'UPDATE', 'settings', 'global', 'Definições do sistema atualizadas');
+  res.json({ message: 'Settings updated' });
 });
 
 const PORT = process.env.PORT || 3001;
