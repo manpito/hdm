@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { ShoppingCart, LogOut, CreditCard } from 'lucide-react';
 import { API_URL } from './config';
 
 const POS = () => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(() => {
+    const t = localStorage.getItem('token');
+    return (t === 'null' || t === 'undefined') ? null : t;
+  });
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -15,15 +18,15 @@ const POS = () => {
   const [cardId, setCardId] = useState('');
   const [status, setStatus] = useState({ msg: '', type: '' });
 
-  useEffect(() => {
-    if (token) {
-      const savedUser = JSON.parse(localStorage.getItem('user'));
-      setUser(savedUser);
-      fetchProducts();
-    }
-  }, [token]);
+  const logout = useCallback(() => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+  }, []);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
+    if (!token) return;
     try {
       const res = await axios.get(`${API_URL}/products`, { headers: { Authorization: `Bearer ${token}` } });
       setProducts(res.data);
@@ -31,8 +34,23 @@ const POS = () => {
       const initialQuants = {};
       res.data.forEach(p => initialQuants[p.id] = 1);
       setQuantities(initialQuants);
-    } catch (err) { setError('Falha ao carregar produtos'); }
-  };
+    } catch (err) {
+      setError('Falha ao carregar produtos');
+      if (err.response?.status === 401) logout();
+    }
+  }, [token, logout]);
+
+  useEffect(() => {
+    if (token) {
+      const savedUser = JSON.parse(localStorage.getItem('user'));
+      if (savedUser && (savedUser.role === 'pos' || savedUser.role === 'admin')) {
+        setUser(savedUser);
+        fetchProducts();
+      } else {
+        logout();
+      }
+    }
+  }, [token, fetchProducts, logout]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -44,19 +62,25 @@ const POS = () => {
       }
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('user', JSON.stringify(res.data.user));
-      setToken(res.data.token);
       setUser(res.data.user);
+      setToken(res.data.token);
     } catch (err) {
       setError(err.response?.data?.error || 'Erro no login');
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
-  };
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response?.status === 401) {
+          logout();
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptor);
+  }, [logout]);
 
   const addToCart = (p) => {
     const qtyToAdd = parseInt(quantities[p.id] || 1);
@@ -108,6 +132,7 @@ const POS = () => {
       fetchProducts();
     } catch (err) {
       setStatus({ msg: err.response?.data?.error || 'Erro na venda', type: 'err' });
+      if (err.response?.status === 401) logout();
     }
   };
 
