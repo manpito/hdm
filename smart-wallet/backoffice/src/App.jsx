@@ -36,6 +36,20 @@ const exportPDF = (headers, rows, filename) => {
   doc.save(`${filename}.pdf`);
 };
 
+const downloadCSV = (data, filename) => {
+  const ws = XLSX.utils.json_to_sheet(data);
+  const csv = XLSX.utils.sheet_to_csv(ws);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.setAttribute("href", url);
+  link.setAttribute("download", `${filename}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 // --- Auth Guard ---
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const user = JSON.parse(localStorage.getItem('user'));
@@ -217,8 +231,23 @@ const UsersManagement = () => {
     fetchUsers();
   };
 
+  const exportCSV = () => {
+    const data = users.map(u => ({
+      username: u.username,
+      role: u.role,
+      full_name: u.full_name,
+      is_active: u.is_active ? 'Sim' : 'Não'
+    }));
+    downloadCSV(data, 'utilizadores');
+  };
+
   return (
     <div className="space-y-8">
+      <div className="flex justify-end">
+        <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded font-bold flex items-center gap-2 hover:bg-green-700 transition">
+          <Download size={18} /> Exportar CSV
+        </button>
+      </div>
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded shadow-sm border grid grid-cols-2 gap-4">
         <h3 className="col-span-2 font-bold border-b pb-2 mb-2">{editing ? 'Editar Utilizador' : 'Novo Utilizador'}</h3>
         <input placeholder="Username" className="p-2 border rounded" value={form.username} onChange={e => setForm({...form, username: e.target.value})} disabled={editing} />
@@ -351,8 +380,23 @@ const StockManagement = () => {
     fetchStock();
   };
 
+  const exportCSV = () => {
+    const data = products.map(p => ({
+      name: p.name,
+      price: p.price,
+      stock_quantity: p.stock_quantity,
+      stock_minimum: p.stock_minimum
+    }));
+    downloadCSV(data, 'stock');
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded font-bold flex items-center gap-2 hover:bg-green-700 transition">
+          <Download size={18} /> Exportar CSV
+        </button>
+      </div>
       <form onSubmit={saveProduct} className="bg-white p-6 rounded shadow-sm border grid grid-cols-4 gap-4">
         <h3 className="col-span-4 font-bold border-b pb-2">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
         <input placeholder="Nome" className="p-2 border rounded col-span-2" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
@@ -780,6 +824,7 @@ const CardsManagement = () => {
   const [recharge, setRecharge] = useState({ id: '', amount: '' });
   const [config, setConfig] = useState({});
   const [entities, setEntities] = useState([]);
+  const [importData, setImportData] = useState({ valid: [], errors: [], results: null });
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -834,68 +879,163 @@ const CardsManagement = () => {
     } catch (err) { alert('Erro no carregamento'); }
   };
 
+  const exportCSV = () => {
+    const data = filteredCards.map(c => ({
+      uid: c.id,
+      owner_name: c.owner_name,
+      entity: c.entity,
+      balance: c.balance,
+      is_active: c.is_active ? 'Sim' : 'Não',
+      created_at: new Date(c.created_at).toLocaleString(),
+      price_paid: c.price_paid
+    }));
+    downloadCSV(data, 'cartoes');
+  };
+
+  const downloadTemplate = () => {
+    const template = [{
+      uid: '12345678',
+      owner_name: 'João Silva',
+      entity: 'Empresa A',
+      balance: 100,
+      price_paid: 500
+    }];
+    downloadCSV(template, 'template_cartoes');
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const bstr = event.target.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json(ws);
+
+      const valid = [];
+      const errors = [];
+      const seenUids = new Set();
+      const existingUids = new Set(cards.map(c => c.id));
+
+      data.forEach((row, index) => {
+        const line = index + 1;
+        const { uid, owner_name, price_paid, balance, entity } = row;
+
+        if (!uid || !owner_name || price_paid === undefined) {
+          errors.push(`Linha ${line}: Campos obrigatórios em falta (uid, owner_name, price_paid).`);
+          return;
+        }
+
+        if (seenUids.has(uid)) {
+          errors.push(`Linha ${line}: UID duplicado no ficheiro (${uid}).`);
+          return;
+        }
+
+        if (existingUids.has(uid)) {
+          errors.push(`Linha ${line}: UID já existe no sistema (${uid}).`);
+          return;
+        }
+
+        seenUids.add(uid);
+        valid.push({
+          uid: String(uid),
+          owner_name: String(owner_name),
+          entity: entity ? String(entity) : '',
+          price_paid: Number(price_paid),
+          balance: balance ? Number(balance) : 0
+        });
+      });
+
+      setImportData({ valid, errors, results: null });
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const confirmImport = async () => {
+    if (importData.valid.length === 0) return;
+    try {
+      const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+      const res = await axios.post(`${API_URL}/cards/bulk-import`, { cards: importData.valid }, config);
+      setImportData({ ...importData, results: res.data });
+      fetchCards();
+    } catch (err) {
+      alert('Erro ao importar cartões.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex gap-4 border-b">
         <button onClick={() => setTab('active')} className={`pb-2 px-4 font-bold ${tab === 'active' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Cartões Activos</button>
         <button onClick={() => setTab('issue')} className={`pb-2 px-4 font-bold ${tab === 'issue' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Emissão de Cartão</button>
+        <button onClick={() => setTab('import')} className={`pb-2 px-4 font-bold ${tab === 'import' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Importação</button>
       </div>
 
       {tab === 'active' ? (
-        <div className="space-y-4">
-          <div className="bg-white p-4 rounded-lg shadow-sm border flex gap-4">
-             <input placeholder="Filtrar por titular..." className="p-2 border rounded flex-1" value={search} onChange={e => setSearch(e.target.value)} />
-             <select className="p-2 border rounded" value={filters.entity} onChange={e => setFilters({...filters, entity: e.target.value})}>
-                <option value="">Todas Entidades</option>
-                {entities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
-             </select>
-             <select className="p-2 border rounded" value={filters.is_active} onChange={e => setFilters({...filters, is_active: e.target.value})}>
-                <option value="1">Activos</option>
-                <option value="0">Cancelados</option>
-                <option value="">Todos</option>
-             </select>
+        <>
+          <div className="flex justify-end -mb-2">
+            <button onClick={exportCSV} className="bg-green-600 text-white px-4 py-2 rounded font-bold flex items-center gap-2 hover:bg-green-700 transition">
+              <Download size={18} /> Exportar CSV
+            </button>
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 bg-white border rounded-xl shadow-sm overflow-hidden">
-               <table className="w-full text-sm text-left">
-                  <thead className="bg-gray-50 border-b text-[10px] uppercase font-black text-gray-500">
-                    <tr><th className="p-4">UID / Titular</th><th className="p-4">Entidade</th><th className="p-4">Saldo</th><th className="p-4">Criado em</th><th className="p-4">Estado</th><th className="p-4">Acções</th></tr>
-                  </thead>
-                  <tbody>
-                    {filteredCards.map(c => (
-                      <tr key={c.id} className="border-b hover:bg-gray-50 transition">
-                        <td className="p-4">
-                          <p className="font-mono text-[10px] text-gray-400">{c.id}</p>
-                          <p className="font-bold">{c.owner_name || 'N/A'}</p>
-                        </td>
-                        <td className="p-4 text-xs font-bold text-gray-400">{c.entity || '-'}</td>
-                        <td className="p-4 font-black text-blue-600">{(c.balance ?? 0).toFixed(2)}</td>
-                        <td className="p-4 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
-                        <td className="p-4">
-                           <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${c.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{c.is_active ? 'ACTIVO' : 'CANCELADO'}</span>
-                        </td>
-                        <td className="p-4">
-                           <div className="flex gap-2">
-                             <button onClick={() => setRecharge({...recharge, id: c.id})} className="text-blue-600 text-xs font-bold hover:underline">Carregar</button>
-                             {c.is_active === 1 && <button onClick={() => handleCancel(c.id)} className="text-red-600 text-xs font-bold hover:underline">Cancelar</button>}
-                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-               </table>
+          <div className="space-y-4">
+            <div className="bg-white p-4 rounded-lg shadow-sm border flex gap-4">
+               <input placeholder="Filtrar por titular..." className="p-2 border rounded flex-1" value={search} onChange={e => setSearch(e.target.value)} />
+               <select className="p-2 border rounded" value={filters.entity} onChange={e => setFilters({...filters, entity: e.target.value})}>
+                  <option value="">Todas Entidades</option>
+                  {entities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
+               </select>
+               <select className="p-2 border rounded" value={filters.is_active} onChange={e => setFilters({...filters, is_active: e.target.value})}>
+                  <option value="1">Activos</option>
+                  <option value="0">Cancelados</option>
+                  <option value="">Todos</option>
+               </select>
             </div>
 
-            <form onSubmit={handleRecharge} className="bg-white p-6 border rounded-xl shadow-sm h-fit space-y-4">
-               <h3 className="font-black uppercase text-gray-400 text-xs border-b pb-2">Carregamento Rápido</h3>
-               <input placeholder="UID Cartão" className="w-full p-3 border rounded-lg bg-gray-50 font-mono" value={recharge.id} onChange={e => setRecharge({...recharge, id: e.target.value})} required />
-               <input placeholder="Valor (un.)" type="number" className="w-full p-3 border rounded-lg font-black text-xl text-blue-600" value={recharge.amount} onChange={e => setRecharge({...recharge, amount: e.target.value})} required />
-               <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">Confirmar Carregamento</button>
-            </form>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-white border rounded-xl shadow-sm overflow-hidden">
+                 <table className="w-full text-sm text-left">
+                    <thead className="bg-gray-50 border-b text-[10px] uppercase font-black text-gray-500">
+                      <tr><th className="p-4">UID / Titular</th><th className="p-4">Entidade</th><th className="p-4">Saldo</th><th className="p-4">Criado em</th><th className="p-4">Estado</th><th className="p-4">Acções</th></tr>
+                    </thead>
+                    <tbody>
+                      {filteredCards.map(c => (
+                        <tr key={c.id} className="border-b hover:bg-gray-50 transition">
+                          <td className="p-4">
+                            <p className="font-mono text-[10px] text-gray-400">{c.id}</p>
+                            <p className="font-bold">{c.owner_name || 'N/A'}</p>
+                          </td>
+                          <td className="p-4 text-xs font-bold text-gray-400">{c.entity || '-'}</td>
+                          <td className="p-4 font-black text-blue-600">{(c.balance ?? 0).toFixed(2)}</td>
+                          <td className="p-4 text-xs">{new Date(c.created_at).toLocaleDateString()}</td>
+                          <td className="p-4">
+                             <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${c.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{c.is_active ? 'ACTIVO' : 'CANCELADO'}</span>
+                          </td>
+                          <td className="p-4">
+                             <div className="flex gap-2">
+                               <button onClick={() => setRecharge({...recharge, id: c.id})} className="text-blue-600 text-xs font-bold hover:underline">Carregar</button>
+                               {c.is_active === 1 && <button onClick={() => handleCancel(c.id)} className="text-red-600 text-xs font-bold hover:underline">Cancelar</button>}
+                             </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                 </table>
+              </div>
+
+              <form onSubmit={handleRecharge} className="bg-white p-6 border rounded-xl shadow-sm h-fit space-y-4">
+                 <h3 className="font-black uppercase text-gray-400 text-xs border-b pb-2">Carregamento Rápido</h3>
+                 <input placeholder="UID Cartão" className="w-full p-3 border rounded-lg bg-gray-50 font-mono" value={recharge.id} onChange={e => setRecharge({...recharge, id: e.target.value})} required />
+                 <input placeholder="Valor (un.)" type="number" className="w-full p-3 border rounded-lg font-black text-xl text-blue-600" value={recharge.amount} onChange={e => setRecharge({...recharge, amount: e.target.value})} required />
+                 <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">Confirmar Carregamento</button>
+              </form>
+            </div>
           </div>
-        </div>
-      ) : (
+        </>
+      ) : tab === 'issue' ? (
         <form onSubmit={handleIssue} className="bg-white p-8 border rounded-xl shadow-sm max-w-lg mx-auto space-y-6">
            <div className="text-center border-b pb-4">
               <h3 className="text-2xl font-black text-blue-900">Emissão de Cartão</h3>
@@ -921,6 +1061,95 @@ const CardsManagement = () => {
            </div>
            <button className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg hover:bg-blue-700 transition shadow-lg">EMITIR CARTÃO</button>
         </form>
+      ) : (
+        <div className="bg-white p-8 border rounded-xl shadow-sm max-w-2xl mx-auto space-y-6">
+           <div className="flex justify-between items-center border-b pb-4">
+              <div>
+                 <h3 className="text-2xl font-black text-blue-900">Importação em Massa</h3>
+                 <p className="text-gray-500 text-sm">Carregue um ficheiro CSV para importar cartões</p>
+              </div>
+              <button onClick={downloadTemplate} className="text-blue-600 text-xs font-bold hover:underline flex items-center gap-1">
+                 <Download size={14} /> Descarregar Template CSV
+              </button>
+           </div>
+
+           <div className="space-y-4">
+              <div className="p-10 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center gap-4 hover:border-blue-400 transition cursor-pointer relative">
+                 <input
+                    type="file"
+                    accept=".csv"
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                    onChange={handleFileUpload}
+                 />
+                 <div className="p-4 bg-blue-50 text-blue-600 rounded-full">
+                    <Plus size={32} />
+                 </div>
+                 <p className="font-bold text-gray-400">Clique para selecionar ou arraste o ficheiro CSV</p>
+              </div>
+
+              {(importData.valid.length > 0 || importData.errors.length > 0) && !importData.results && (
+                 <div className="space-y-4">
+                    <div className="p-4 rounded-lg bg-gray-50 border grid grid-cols-2 gap-4">
+                       <div className="text-center">
+                          <p className="text-2xl font-black text-green-600">{importData.valid.length}</p>
+                          <p className="text-xs font-bold uppercase text-gray-400">Válidos para importar</p>
+                       </div>
+                       <div className="text-center border-l">
+                          <p className="text-2xl font-black text-red-600">{importData.errors.length}</p>
+                          <p className="text-xs font-bold uppercase text-gray-400">Erros encontrados</p>
+                       </div>
+                    </div>
+
+                    {importData.errors.length > 0 && (
+                       <div className="max-h-40 overflow-y-auto p-3 bg-red-50 border border-red-100 rounded text-xs text-red-700 space-y-1">
+                          <p className="font-bold mb-2 uppercase">Erros de Validação:</p>
+                          {importData.errors.map((err, i) => <p key={i}>• {err}</p>)}
+                       </div>
+                    )}
+
+                    <button
+                       onClick={confirmImport}
+                       disabled={importData.valid.length === 0}
+                       className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-md disabled:opacity-50"
+                    >
+                       Confirmar Importação ({importData.valid.length} cartões)
+                    </button>
+                 </div>
+              )}
+
+              {importData.results && (
+                 <div className="space-y-4">
+                    <div className="p-6 rounded-xl bg-blue-50 border-2 border-blue-200 text-center">
+                       <h4 className="text-xl font-black text-blue-900 mb-2">Importação Concluída</h4>
+                       <div className="grid grid-cols-2 gap-4 mt-4">
+                          <div className="bg-white p-3 rounded shadow-sm">
+                             <p className="text-2xl font-black text-green-600">{importData.results.success}</p>
+                             <p className="text-[10px] font-bold uppercase text-gray-400">Sucesso</p>
+                          </div>
+                          <div className="bg-white p-3 rounded shadow-sm">
+                             <p className="text-2xl font-black text-red-600">{importData.results.failed}</p>
+                             <p className="text-[10px] font-bold uppercase text-gray-400">Falhas</p>
+                          </div>
+                       </div>
+                    </div>
+
+                    {importData.results.errors.length > 0 && (
+                       <div className="max-h-40 overflow-y-auto p-3 bg-red-50 border border-red-100 rounded text-xs text-red-700 space-y-1">
+                          <p className="font-bold mb-2 uppercase">Relatório de Falhas:</p>
+                          {importData.results.errors.map((err, i) => <p key={i}>• UID {err.uid}: {err.error}</p>)}
+                       </div>
+                    )}
+
+                    <button
+                       onClick={() => setImportData({ valid: [], errors: [], results: null })}
+                       className="w-full bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition"
+                    >
+                       Limpar e Voltar
+                    </button>
+                 </div>
+              )}
+           </div>
+        </div>
       )}
     </div>
   );
