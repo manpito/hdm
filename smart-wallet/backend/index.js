@@ -276,6 +276,43 @@ app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'fin
   }
 });
 
+app.post('/api/cards/bulk-import', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+  const { cards } = req.body;
+  if (!Array.isArray(cards)) {
+    return res.status(400).json({ error: 'Lista de cartões inválida' });
+  }
+
+  const results = {
+    success: 0,
+    failed: 0,
+    errors: []
+  };
+
+  try {
+    await db.run('BEGIN TRANSACTION');
+    for (const card of cards) {
+      try {
+        const { uid, owner_name, entity, balance, price_paid } = card;
+        await db.run(
+          'INSERT INTO cards (id, owner_name, entity, price_paid, balance, is_active) VALUES (?, ?, ?, ?, ?, 1)',
+          [uid, owner_name, entity, price_paid, balance]
+        );
+        // Regista nos audit_logs como "Migração de Sistema"
+        await logAction(req, 'RECHARGE', 'card', uid, 'Migração de Sistema', balance);
+        results.success++;
+      } catch (err) {
+        results.failed++;
+        results.errors.push({ uid: card.uid, error: 'UID duplicado ou erro na BD' });
+      }
+    }
+    await db.run('COMMIT');
+    res.json(results);
+  } catch (error) {
+    await db.run('ROLLBACK');
+    res.status(500).json({ error: 'Erro no processamento da importação em massa' });
+  }
+});
+
 // --- Vendas (POS e Admin) ---
 app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), async (req, res) => {
   const { card_id, items } = req.body;
