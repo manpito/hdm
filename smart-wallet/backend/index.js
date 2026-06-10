@@ -327,6 +327,7 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
     }
 
     let totalCartPrice = 0;
+    let lastSaleId = null;
     for (const item of items) {
       const product = await db.get('SELECT * FROM products WHERE id = ?', item.product_id);
       if (!product || product.stock_quantity < item.quantity) {
@@ -336,10 +337,11 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
       const itemPrice = product.price * item.quantity;
       totalCartPrice += itemPrice;
       await db.run('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?', [item.quantity, item.product_id]);
-      await db.run(
+      const result = await db.run(
         'INSERT INTO sales (card_id, product_id, quantity, total_price, terminal_id) VALUES (?, ?, ?, ?, ?)',
         [card_id, item.product_id, item.quantity, itemPrice, terminal_id]
       );
+      lastSaleId = result.lastID;
     }
 
     if (card.balance < totalCartPrice) {
@@ -347,10 +349,15 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
       return res.status(400).json({ error: 'Saldo insuficiente' });
     }
 
-    await db.run('UPDATE cards SET balance = balance - ? WHERE id = ?', [totalCartPrice, card_id]);
+    const newBalance = card.balance - totalCartPrice;
+    await db.run('UPDATE cards SET balance = ? WHERE id = ?', [newBalance, card_id]);
     await db.run('COMMIT');
     await logAction(req, 'SALE', 'sale', card_id, `Venda realizada: ${totalCartPrice.toFixed(2)} un. no cartão ${card_id}`, totalCartPrice);
-    res.status(201).json({ message: 'Venda realizada com sucesso' });
+    res.status(201).json({
+      message: 'Venda realizada com sucesso',
+      id: lastSaleId,
+      remaining_balance: newBalance
+    });
   } catch (error) {
     await db.run('ROLLBACK');
     res.status(500).json({ error: 'Erro no processamento da venda' });

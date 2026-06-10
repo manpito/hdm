@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { ShoppingCart, LogOut, CreditCard } from 'lucide-react';
+import { ShoppingCart, LogOut, CreditCard, Printer } from 'lucide-react';
 import { API_URL } from './config';
 
 const POS = () => {
@@ -18,6 +18,8 @@ const POS = () => {
   const [status, setStatus] = useState({ msg: '', type: '' });
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [keypadValue, setKeypadValue] = useState('1');
+  const [settings, setSettings] = useState({});
+  const [receipt, setReceipt] = useState(null);
 
   const logout = useCallback(() => {
     localStorage.removeItem('token');
@@ -37,17 +39,28 @@ const POS = () => {
     }
   }, [token, logout]);
 
+  const fetchSettings = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await axios.get(`${API_URL}/settings`, { headers: { Authorization: `Bearer ${token}` } });
+      setSettings(res.data);
+    } catch (err) {
+      console.error('Falha ao carregar definições');
+    }
+  }, [token]);
+
   useEffect(() => {
     if (token) {
       const savedUser = JSON.parse(localStorage.getItem('user'));
       if (savedUser && (savedUser.role === 'pos' || savedUser.role === 'admin')) {
         setUser(savedUser);
         fetchProducts();
+        fetchSettings();
       } else {
         logout();
       }
     }
-  }, [token, fetchProducts, logout]);
+  }, [token, fetchProducts, fetchSettings, logout]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -118,14 +131,25 @@ const POS = () => {
   const checkout = async () => {
     if (!cardId) { setStatus({ msg: 'Aproxime o cartão!', type: 'err' }); return; }
     try {
-      await axios.post(`${API_URL}/sales`, {
+      const res = await axios.post(`${API_URL}/sales`, {
         card_id: cardId,
         items: cart.map(i => ({ product_id: i.id, quantity: i.quantity }))
       }, { headers: { Authorization: `Bearer ${token}` } });
 
+      const now = new Date();
+      const pad = (n) => n.toString().padStart(2, '0');
+      const formattedDate = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+      setReceipt({
+        id: res.data.id,
+        date: formattedDate,
+        items: [...cart],
+        total: cart.reduce((a, b) => a + ((b.price ?? 0) * b.quantity), 0),
+        balance: res.data.remaining_balance,
+        card_id: cardId
+      });
+
       setStatus({ msg: 'Venda realizada!', type: 'ok' });
-      setCart([]); setCardId('');
-      fetchProducts();
     } catch (err) {
       setStatus({ msg: err.response?.data?.error || 'Erro na venda', type: 'err' });
       if (err.response?.status === 401) logout();
@@ -146,8 +170,38 @@ const POS = () => {
     );
   }
 
+  const maskCardId = (id) => {
+    if (!id || id.length < 8) return "****";
+    return `${id.substring(0, 4)}****${id.substring(id.length - 4)}`;
+  };
+
+  const handleNewSale = () => {
+    setReceipt(null);
+    setCart([]);
+    setCardId('');
+    setStatus({ msg: '', type: '' });
+    fetchProducts();
+  };
+
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden font-sans">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #receipt-print, #receipt-print * { visibility: visible; }
+          #receipt-print {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white !important;
+            color: black !important;
+            padding: 20px;
+            font-family: 'Courier New', Courier, monospace;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
       <div className="flex-1 p-6 overflow-y-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-2xl font-black text-blue-900 uppercase">Terminal de Vendas</h1>
@@ -173,8 +227,67 @@ const POS = () => {
         </div>
       </div>
 
-      <div className="w-96 bg-white shadow-2xl flex flex-col border-l relative">
-        {selectedProduct ? (
+      <div className="w-96 bg-white shadow-2xl flex flex-col border-l relative overflow-hidden">
+        {receipt ? (
+          <div id="receipt-print" className="flex flex-col h-full bg-white animate-in fade-in duration-300">
+             <div className="p-8 flex-1 overflow-y-auto">
+                <div className="text-center mb-6">
+                   <h2 className="text-2xl font-black text-blue-900 uppercase mb-1">{settings.installationName || 'SmartWallet'}</h2>
+                   <p className="text-sm font-bold text-gray-500">{receipt.date}</p>
+                   <p className="text-xs font-bold text-gray-400 mt-2 uppercase">Transação: #{receipt.id}</p>
+                </div>
+
+                <div className="border-t-2 border-dashed border-gray-200 my-4"></div>
+
+                <div className="space-y-3 mb-6">
+                   {receipt.items.map((item, idx) => (
+                     <div key={idx} className="flex justify-between text-sm">
+                        <div className="flex-1">
+                           <p className="font-bold text-gray-800">{item.name}</p>
+                           <p className="text-xs text-gray-500">{item.quantity}x @ {(item.price ?? 0).toFixed(2)}</p>
+                        </div>
+                        <p className="font-black text-gray-900">{((item.quantity * (item.price ?? 0))).toFixed(2)}</p>
+                     </div>
+                   ))}
+                </div>
+
+                <div className="border-t-2 border-dashed border-gray-200 my-4"></div>
+
+                <div className="space-y-2">
+                   <div className="flex justify-between items-center">
+                      <span className="font-bold text-gray-500 uppercase text-xs">Total Compra</span>
+                      <span className="text-xl font-black text-blue-900">{(receipt.total ?? 0).toFixed(2)} un.</span>
+                   </div>
+                   <div className="flex justify-between items-center">
+                      <span className="font-bold text-gray-500 uppercase text-xs">Saldo Restante</span>
+                      <span className="text-lg font-bold text-green-600">{(receipt.balance ?? 0).toFixed(2)} un.</span>
+                   </div>
+                </div>
+
+                <div className="border-t-2 border-dashed border-gray-200 my-6"></div>
+
+                <div className="text-center">
+                   <p className="text-xs font-bold text-gray-400 uppercase mb-1">Cartão: {maskCardId(receipt.card_id)}</p>
+                   <p className="text-lg font-black text-blue-900 uppercase tracking-tighter">Obrigado pela sua compra</p>
+                </div>
+             </div>
+
+             <div className="p-6 bg-gray-50 border-t space-y-3 no-print">
+                <button
+                   onClick={handleNewSale}
+                   className="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-2xl hover:bg-green-700 active:scale-95 transition transform shadow-lg"
+                >
+                   NOVA VENDA
+                </button>
+                <button
+                   onClick={() => window.print()}
+                   className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-lg hover:bg-blue-700 active:scale-95 transition transform flex items-center justify-center gap-2"
+                >
+                   <Printer size={20} /> IMPRIMIR
+                </button>
+             </div>
+          </div>
+        ) : selectedProduct ? (
           <div className="flex flex-col h-full bg-gray-50 animate-in fade-in slide-in-from-right duration-200">
             <div className="p-6 bg-white border-b">
                <h3 className="text-xl font-black text-blue-900 uppercase mb-1">{selectedProduct.name}</h3>
