@@ -818,6 +818,12 @@ const AuditLogs = () => {
 const CardsManagement = () => {
   const [tab, setTab] = useState('active');
   const [cards, setCards] = useState([]);
+  const [rechargeReceipt, setRechargeReceipt] = useState(null);
+
+  const maskCardId = (id) => {
+    if (!id || id.length < 8) return "****";
+    return `${id.substring(0, 4)}****${id.substring(id.length - 4)}`;
+  };
   const [filters, setFilters] = useState({ owner_name: '', is_active: '1', entity: '' });
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ id: '', owner_name: '', entity: '', price_paid: '' });
@@ -872,8 +878,23 @@ const CardsManagement = () => {
   const handleRecharge = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_URL}/cards/recharge`, recharge, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
-      alert('Carregado!');
+      const res = await axios.post(`${API_URL}/cards/recharge`, recharge, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+
+      const card = cards.find(c => c.id === recharge.id);
+      const now = new Date();
+      const pad = (n) => n.toString().padStart(2, '0');
+      const formattedDate = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+      setRechargeReceipt({
+        owner_name: card?.owner_name || 'N/A',
+        card_id: recharge.id,
+        amount: recharge.amount,
+        new_balance: res.data.balance,
+        date: formattedDate,
+        event_type: "CARREGAMENTO",
+        installation_name: config.installationName
+      });
+
       setRecharge({ id: '', amount: '' });
       fetchCards();
     } catch (err) { alert('Erro no carregamento'); }
@@ -968,6 +989,24 @@ const CardsManagement = () => {
 
   return (
     <div className="space-y-6">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #recharge-receipt, #recharge-receipt * { visibility: visible; }
+          #recharge-receipt {
+            position: absolute;
+            left: 0; top: 0;
+            width: 80mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            padding: 10mm;
+            background: white;
+            color: black;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+
       <div className="flex gap-4 border-b">
         <button onClick={() => setTab('active')} className={`pb-2 px-4 font-bold ${tab === 'active' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Cartões Activos</button>
         <button onClick={() => setTab('issue')} className={`pb-2 px-4 font-bold ${tab === 'issue' ? 'border-b-4 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Emissão de Cartão</button>
@@ -1149,6 +1188,52 @@ const CardsManagement = () => {
                  </div>
               )}
            </div>
+        </div>
+      )}
+      {rechargeReceipt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm w-full">
+            <div id="recharge-receipt" className="mx-auto border p-4 bg-white text-black font-mono text-sm">
+              <div className="text-center mb-4">
+                <div className="font-bold uppercase mb-1">{rechargeReceipt.installation_name}</div>
+                <div>--------------------------------</div>
+                <div className="font-bold uppercase">Comprovativo de Carregamento</div>
+                <div>--------------------------------</div>
+              </div>
+              <div className="space-y-1 mb-4">
+                <div>Data:     {rechargeReceipt.date}</div>
+                <div>Evento:   {rechargeReceipt.event_type}</div>
+              </div>
+              <div className="mb-4">--------------------------------</div>
+              <div className="space-y-1 mb-4">
+                <div>Titular:  {rechargeReceipt.owner_name}</div>
+                <div>Cartão:   {maskCardId(rechargeReceipt.card_id)}</div>
+              </div>
+              <div className="mb-4">--------------------------------</div>
+              <div className="space-y-1 mb-4">
+                <div>Valor:    +{(Number(rechargeReceipt.amount) || 0).toFixed(2)} un.</div>
+                <div>Saldo:    {(rechargeReceipt.new_balance || 0).toFixed(2)} un.</div>
+              </div>
+              <div className="text-center mt-4">
+                <div>--------------------------------</div>
+                <div className="font-bold uppercase mt-2">Obrigado</div>
+              </div>
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-4 no-print">
+              <button
+                onClick={() => window.print()}
+                className="bg-blue-600 text-white py-2 rounded-lg font-bold hover:bg-blue-700 transition"
+              >
+                IMPRIMIR
+              </button>
+              <button
+                onClick={() => setRechargeReceipt(null)}
+                className="bg-gray-100 text-gray-600 py-2 rounded-lg font-bold hover:bg-gray-200 transition"
+              >
+                FECHAR
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
