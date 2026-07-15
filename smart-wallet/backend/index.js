@@ -260,6 +260,56 @@ app.put('/api/cards/:id/cancel', authenticateToken, authorizeRoles(['admin', 'fi
   res.json({ message: 'Cartão cancelado' });
 });
 
+app.put('/api/cards/:id/edit', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+    const { id } = req.params;
+    const { owner_name, entity } = req.body;
+    const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
+    if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
+    await db.run('UPDATE cards SET owner_name = ?, entity = ? WHERE id = ?', [owner_name, entity, id]);
+    await logAction(req, 'UPDATE_CARD', 'card', id, `Cartão actualizado: nome="${owner_name}", entidade="${entity}"`);
+    res.json({ message: 'Cartão actualizado' });
+});
+
+app.post('/api/cards/transfer', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
+    const { old_id, new_id } = req.body;
+
+    try {
+        await db.run('BEGIN TRANSACTION');
+
+        const oldCard = await db.get('SELECT * FROM cards WHERE id = ?', [old_id]);
+        if (!oldCard || oldCard.is_active !== 1) {
+            await db.run('ROLLBACK');
+            return res.status(400).json({ error: 'Cartão antigo não encontrado ou não está activo' });
+        }
+
+        const newCard = await db.get('SELECT * FROM cards WHERE id = ?', [new_id]);
+        if (!newCard || newCard.is_active !== 1) {
+            await db.run('ROLLBACK');
+            return res.status(400).json({ error: 'Cartão novo não encontrado ou não está activo' });
+        }
+
+        if (old_id === new_id) {
+            await db.run('ROLLBACK');
+            return res.status(400).json({ error: 'Os cartões devem ser diferentes' });
+        }
+
+        const transferred_balance = oldCard.balance;
+        const new_balance = newCard.balance + transferred_balance;
+
+        await db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', [old_id]);
+        await db.run('UPDATE cards SET balance = ? WHERE id = ?', [new_balance, new_id]);
+
+        await logAction(req, 'TRANSFER_OUT', 'card', old_id, transferred_balance);
+        await logAction(req, 'TRANSFER_IN', 'card', new_id, transferred_balance);
+
+        await db.run('COMMIT');
+        res.json({ message: 'Saldo transferido', transferred_balance, new_balance });
+    } catch (error) {
+        await db.run('ROLLBACK');
+        res.status(500).json({ error: 'Erro ao transferir saldo' });
+    }
+});
+
 app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { id, amount } = req.body;
   const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
