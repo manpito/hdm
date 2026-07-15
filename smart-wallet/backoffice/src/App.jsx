@@ -819,6 +819,10 @@ const CardsManagement = () => {
   const [tab, setTab] = useState('active');
   const [cards, setCards] = useState([]);
   const [rechargeReceipt, setRechargeReceipt] = useState(null);
+  const [editingCard, setEditingCard] = useState(null);
+  const [editForm, setEditForm] = useState({ owner_name: '', entity: '' });
+  const [transferCard, setTransferCard] = useState(null);
+  const [newCardUid, setNewCardUid] = useState('');
 
   const maskCardId = (id) => {
     if (!id || id.length < 8) return "****";
@@ -873,6 +877,37 @@ const CardsManagement = () => {
     if (!confirm('Tem a certeza que deseja cancelar este cartão? O saldo será perdido.')) return;
     await axios.put(`${API_URL}/cards/${id}/cancel`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
     fetchCards();
+  };
+
+  const handleEditCard = async () => {
+    try {
+      await axios.put(
+        `${API_URL}/cards/${editingCard.id}/edit`,
+        editForm,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      setEditingCard(null);
+      fetchCards();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao editar cartão');
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!newCardUid) { alert('Introduza o UID do novo cartão'); return; }
+    if (!confirm(`Transferir ${transferCard.balance.toFixed(2)} un. do cartão de ${transferCard.owner_name} para o cartão ${newCardUid}? O cartão antigo será cancelado.`)) return;
+    try {
+      await axios.post(
+        `${API_URL}/cards/transfer`,
+        { old_id: transferCard.id, new_id: newCardUid },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+      );
+      alert('Saldo transferido com sucesso!');
+      setTransferCard(null);
+      fetchCards();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro na transferência');
+    }
   };
 
   const handleRecharge = async (e) => {
@@ -1056,6 +1091,18 @@ const CardsManagement = () => {
                           <td className="p-4">
                              <div className="flex gap-2">
                                <button onClick={() => setRecharge({...recharge, id: c.id})} className="text-blue-600 text-xs font-bold hover:underline">Carregar</button>
+                               <button
+                                   onClick={() => { setEditingCard(c); setEditForm({ owner_name: c.owner_name || '', entity: c.entity || '' }); }}
+                                   className="text-green-600 text-xs font-bold hover:underline"
+                               >
+                                   Editar
+                               </button>
+                               <button
+                                   onClick={() => { setTransferCard(c); setNewCardUid(''); }}
+                                   className="text-purple-600 text-xs font-bold hover:underline"
+                               >
+                                   Transferir
+                               </button>
                                {c.is_active === 1 && <button onClick={() => handleCancel(c.id)} className="text-red-600 text-xs font-bold hover:underline">Cancelar</button>}
                              </div>
                           </td>
@@ -1232,6 +1279,68 @@ const CardsManagement = () => {
               >
                 FECHAR
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingCard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm w-full">
+            <h3 className="text-lg font-bold mb-4">Editar Cartão</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-bold text-gray-700 mb-1">UID do Cartão</label>
+              <div className="p-2 bg-gray-100 border rounded font-mono text-sm text-gray-500">
+                {editingCard.id}
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-bold text-gray-700 mb-1">Nome do Titular</label>
+              <input
+                type="text"
+                value={editForm.owner_name}
+                onChange={(e) => setEditForm({ ...editForm, owner_name: e.target.value })}
+                className="w-full border p-2 rounded"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-bold text-gray-700 mb-1">Entidade</label>
+              <input
+                type="text"
+                value={editForm.entity}
+                onChange={(e) => setEditForm({ ...editForm, entity: e.target.value })}
+                className="w-full border p-2 rounded"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleEditCard} className="flex-1 bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">Guardar</button>
+              <button onClick={() => setEditingCard(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded font-bold hover:bg-gray-300">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {transferCard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm w-full">
+            <h3 className="text-lg font-bold mb-4">Transferir Saldo</h3>
+            <div className="mb-4 bg-gray-50 p-3 rounded border">
+              <div className="text-sm"><strong>Origem:</strong> {transferCard.owner_name}</div>
+              <div className="text-sm"><strong>Cartão:</strong> {maskCardId(transferCard.id)}</div>
+              <div className="text-sm"><strong>Saldo:</strong> {(transferCard.balance ?? 0).toFixed(2)} un.</div>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-bold text-gray-700 mb-1">UID do Novo Cartão</label>
+              <input
+                type="text"
+                value={newCardUid}
+                onChange={(e) => setNewCardUid(e.target.value)}
+                className="w-full border p-2 rounded"
+                placeholder="Insira o UID de destino"
+              />
+            </div>
+            <p className="text-red-500 text-xs mb-4 font-bold">O cartão antigo será cancelado após a transferência.</p>
+            <div className="flex gap-2">
+              <button onClick={handleTransfer} className="flex-1 bg-purple-600 text-white py-2 rounded font-bold hover:bg-purple-700">Confirmar Transferência</button>
+              <button onClick={() => setTransferCard(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded font-bold hover:bg-gray-300">Cancelar</button>
             </div>
           </div>
         </div>
