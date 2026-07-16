@@ -336,7 +336,7 @@ app.post('/api/cards/transfer', authenticateToken, authorizeRoles(['admin', 'fin
 });
 
 app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const { id, amount } = req.body;
+  const { id } = req.body; const amount = Number(req.body.amount);
   const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
   if (card) {
     const newBalance = card.balance + amount;
