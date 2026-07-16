@@ -50,12 +50,27 @@ const downloadCSV = (data, filename) => {
   document.body.removeChild(link);
 };
 
+const isTokenExpired = (token) => {
+    if (!token) return true;
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload.exp * 1000 < Date.now();
+    } catch {
+        return true;
+    }
+};
+
 // --- Auth Guard ---
 const ProtectedRoute = ({ children, allowedRoles }) => {
-  const user = JSON.parse(localStorage.getItem('user'));
-  if (!user) return <Navigate to="/login" />;
-  if (!allowedRoles.includes(user.role)) return <Navigate to="/dashboard" />;
-  return children;
+    const user = JSON.parse(localStorage.getItem('user'));
+    const token = localStorage.getItem('token');
+    if (!user || !token || isTokenExpired(token)) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        return <Navigate to="/login" />;
+    }
+    if (!allowedRoles.includes(user.role)) return <Navigate to="/dashboard" />;
+    return children;
 };
 
 // --- Login Page ---
@@ -98,6 +113,21 @@ const Login = () => {
 const Layout = ({ children }) => {
   const user = JSON.parse(localStorage.getItem('user'));
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+      const interceptor = axios.interceptors.response.use(
+          response => response,
+          error => {
+              if (error.response?.status === 401 || error.response?.status === 403) {
+                  localStorage.removeItem('token');
+                  localStorage.removeItem('user');
+                  window.location.href = '/login';
+              }
+              return Promise.reject(error);
+          }
+      );
+      return () => axios.interceptors.response.eject(interceptor);
+  }, []);
 
   const logout = () => {
     localStorage.removeItem('token');
