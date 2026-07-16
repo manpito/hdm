@@ -4,14 +4,31 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { initDb } from './db.js';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(helmet());
+app.use(cors({
+    origin: [
+        'http://78.47.242.71:5174',
+        'http://78.47.242.71:5173',
+        'http://192.168.100.211:5174',
+        'http://192.168.100.211:5173',
+        'http://localhost:5174',
+        'http://localhost:5173'
+    ],
+    credentials: true
+}));
 app.use(express.json({ limit: '10mb' })); // Para suportar imagens Base64
 
-const JWT_SECRET = process.env.JWT_SECRET || 'smart-wallet-secret-key-123';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('ERRO CRÍTICO: JWT_SECRET não está definido nas variáveis de ambiente.');
+    process.exit(1);
+}
 const MAX_POS_TERMINALS = parseInt(process.env.MAX_POS_TERMINALS || '2');
 
 const db = await initDb();
@@ -49,7 +66,15 @@ const authorizeRoles = (roles) => {
 };
 
 // --- Autenticação ---
-app.post('/api/auth/login', async (req, res) => {
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Demasiadas tentativas de login. Tente novamente em 15 minutos.' }
+});
+
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   const user = await db.get('SELECT * FROM users WHERE username = ?', username);
 
@@ -82,7 +107,7 @@ app.post('/api/auth/login', async (req, res) => {
     username: user.username,
     role: user.role,
     terminal_id: user.terminal_id
-  }, JWT_SECRET);
+  }, JWT_SECRET, { expiresIn: '8h' });
 
   // Log login (precisamos do IP e User ID, req.user ainda não existe aqui)
   const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
