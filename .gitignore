@@ -1,0 +1,45 @@
+# Dependências
+/vendor/
+/node_modules/
+
+# Ambiente — NUNCA commitar
+.env
+.env.local
+.env.*.local
+
+# Chaves criptográficas — NUNCA commitar
+*.pem
+*.key
+/keys/
+/storage/keys/
+
+# IDEs e SO
+/.idea/
+/.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/logs/
+/storage/logs/
+
+# Cache
+/storage/cache/
+/.phpunit.result.cache
+/.phpunit.cache/
+database/*.sqlite
+backups/
+/.phpstan-cache/
+
+# Cobertura e build
+/coverage/
+/build/
+
+# Ficheiros temporários e gerados
+/tmp/
+*.tmp
+/storage/app/temp/
+/storage/exports/
