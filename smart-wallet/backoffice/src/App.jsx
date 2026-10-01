@@ -118,7 +118,7 @@ const Layout = ({ children }) => {
       const interceptor = axios.interceptors.response.use(
           response => response,
           error => {
-              if (error.response?.status === 401 || error.response?.status === 403) {
+              if (error.response?.status === 401) {
                   localStorage.removeItem('token');
                   localStorage.removeItem('user');
                   window.location.href = '/login';
@@ -491,9 +491,12 @@ const Reports = () => {
 
   useEffect(() => {
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    const user = JSON.parse(localStorage.getItem('user'));
     axios.get(`${API_URL}/terminals`, config).then(res => setTerminals(res.data));
     axios.get(`${API_URL}/products`, config).then(res => setProducts(res.data));
-    axios.get(`${API_URL}/users`, config).then(res => setUsers(res.data));
+    if (user?.role === 'admin') {
+      axios.get(`${API_URL}/users`, config).then(res => setUsers(res.data));
+    }
     axios.get(`${API_URL}/cards`, config).then(res => {
       const uniqueEntities = [...new Set(res.data.map(c => c.entity).filter(Boolean))];
       setEntities(uniqueEntities);
@@ -580,6 +583,7 @@ const Reports = () => {
     XLSX.writeFile(wb, `${tab}.xlsx`);
   };
 
+  const user = JSON.parse(localStorage.getItem('user'));
   const tabs = [
     { id: 'vendas_gerais', label: 'Vendas Gerais' },
     { id: 'por_produto', label: 'Por Produto' },
@@ -626,10 +630,12 @@ const Reports = () => {
         )}
         {tab === 'carregamentos' && (
           <>
-            <select className="p-2 border rounded text-sm" value={filters.userId} onChange={e => setFilters({...filters, userId: e.target.value})}>
-              <option value="">Todos Operadores</option>
-              {users.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
-            </select>
+            {user?.role === 'admin' && (
+              <select className="p-2 border rounded text-sm" value={filters.userId} onChange={e => setFilters({...filters, userId: e.target.value})}>
+                <option value="">Todos Operadores</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+              </select>
+            )}
             <select className="p-2 border rounded text-sm" value={filters.entity} onChange={e => setFilters({...filters, entity: e.target.value})}>
               <option value="">Todas Entidades</option>
               {entities.map(ent => <option key={ent} value={ent}>{ent}</option>)}
@@ -776,9 +782,12 @@ const AuditLogs = () => {
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', username: '', action: '' });
 
   const fetchLogs = async () => {
-    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params: { ...filters, page } };
-    const res = await axios.get(`${API_URL}/audit-logs`, config);
-    setData(res.data);
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (user?.role === 'admin') {
+      const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, params: { ...filters, page } };
+      const res = await axios.get(`${API_URL}/audit-logs`, config);
+      setData(res.data);
+    }
   };
 
   useEffect(() => { fetchLogs(); }, [page]);
