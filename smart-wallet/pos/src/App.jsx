@@ -20,6 +20,7 @@ const POS = () => {
   const [keypadValue, setKeypadValue] = useState('1');
   const [settings, setSettings] = useState({});
   const [receipt, setReceipt] = useState(null);
+  const [processing, setProcessing] = useState(false);
 
   const logout = useCallback(() => {
     localStorage.removeItem('token');
@@ -131,7 +132,9 @@ const POS = () => {
   };
 
   const checkout = async () => {
+    if (processing) return;
     if (!cardId) { setStatus({ msg: 'Aproxime o cartão!', type: 'err' }); return; }
+    setProcessing(true);
     try {
       const res = await axios.post(`${API_URL}/sales`, {
         card_id: cardId,
@@ -146,7 +149,7 @@ const POS = () => {
         id: res.data.id,
         date: formattedDate,
         items: [...cart],
-        total: cart.reduce((a, b) => a + ((b.price ?? 0) * b.quantity), 0),
+        total: res.data.total_charged,
         balance: res.data.remaining_balance,
         card_id: cardId
       });
@@ -155,6 +158,8 @@ const POS = () => {
     } catch (err) {
       setStatus({ msg: err.response?.data?.error || 'Erro na venda', type: 'err' });
       if (err.response?.status === 401) logout();
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -388,11 +393,11 @@ const POS = () => {
               </div>
 
               <button
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || processing}
                 onClick={checkout}
                 className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-xl hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 transition"
               >
-                PAGAR AGORA
+                {processing ? 'A processar...' : 'PAGAR AGORA'}
               </button>
 
               {status.msg && (

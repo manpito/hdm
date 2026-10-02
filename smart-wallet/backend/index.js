@@ -530,6 +530,7 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
     res.status(201).json({
       message: 'Venda realizada com sucesso',
       id: lastSaleId,
+      total_charged: totalCartPrice,
       remaining_balance: newBalance
     });
   } catch (error) {
