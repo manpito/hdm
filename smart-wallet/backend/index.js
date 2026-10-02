@@ -399,8 +399,8 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
   }
 
   for (const item of items) {
-      if (!item.id || typeof item.id !== 'number') {
-          return res.status(400).json({ error: 'Cada item deve ter um id numérico válido' });
+      if (!Number.isInteger(item.product_id) || item.product_id <= 0) {
+          return res.status(400).json({ error: 'Cada item deve ter um product_id numérico válido' });
       }
       if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
           return res.status(400).json({ error: 'A quantidade de cada item deve ser um número inteiro positivo' });
