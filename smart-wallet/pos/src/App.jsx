@@ -3,6 +3,94 @@ import axios from 'axios';
 import { ShoppingCart, LogOut, CreditCard, Printer } from 'lucide-react';
 import { API_URL } from './config';
 
+const VirtualKeyboard = ({ activeField, onKeyPress, onBackspace, onEnter, onClose }) => {
+  const [isShift, setIsShift] = useState(false);
+  const [isNumeric, setIsNumeric] = useState(false);
+
+  const qwertyRows = [
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+    ['⇧', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '⌫'],
+    ['123', ' ', 'Enter']
+  ];
+
+  const numericRows = [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+    ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
+    ['-', '_', '=', '+', '[', ']', '{', '}', ';', "'"],
+    ['ABC', ' ', 'Enter']
+  ];
+
+  const rows = isNumeric ? numericRows : qwertyRows;
+
+  const handleKeyClick = (key) => {
+    if (key === '⇧') {
+      setIsShift(!isShift);
+    } else if (key === '123') {
+      setIsNumeric(true);
+      setIsShift(false);
+    } else if (key === 'ABC') {
+      setIsNumeric(false);
+      setIsShift(false);
+    } else if (key === '⌫') {
+      onBackspace();
+    } else if (key === 'Enter') {
+      onEnter();
+    } else {
+      let charToInsert = key;
+      if (!isNumeric && isShift && key !== ' ') {
+        charToInsert = key.toUpperCase();
+        setIsShift(false); // auto revert to lowercase
+      }
+      onKeyPress(charToInsert);
+    }
+  };
+
+  return (
+    <div className="w-full max-w-sm bg-white rounded-xl shadow-2xl p-4 mt-4 relative">
+      <button type="button" onClick={onClose} className="absolute -top-3 -right-3 w-8 h-8 bg-gray-200 text-gray-700 rounded-full font-bold shadow hover:bg-gray-300 flex items-center justify-center">
+        X
+      </button>
+      <div className="flex flex-col gap-2">
+        {rows.map((row, i) => (
+          <div key={i} className={`flex justify-center gap-1 ${i === 1 && !isNumeric ? 'px-4' : ''}`}>
+            {row.map((key) => {
+              const isAction = ['⇧', '⌫', '123', 'ABC'].includes(key);
+              const isEnter = key === 'Enter';
+              const isSpace = key === ' ';
+
+              let btnClass = "py-3 px-2 rounded-lg font-bold shadow-sm active:scale-95 transition min-w-[32px] flex-1 text-center select-none ";
+
+              if (isEnter) {
+                btnClass += "bg-blue-600 text-white min-w-[64px]";
+              } else if (isAction) {
+                btnClass += "bg-gray-700 text-white min-w-[48px]";
+              } else if (isSpace) {
+                btnClass += "bg-gray-100 text-gray-800 flex-[3]";
+              } else {
+                btnClass += "bg-gray-100 text-gray-800 hover:bg-gray-200 text-lg";
+              }
+
+              const displayKey = (!isNumeric && isShift && key.length === 1 && key >= 'a' && key <= 'z') ? key.toUpperCase() : key;
+
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); handleKeyClick(key); }}
+                  className={btnClass}
+                >
+                  {displayKey}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const POS = () => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => {
@@ -21,6 +109,8 @@ const POS = () => {
   const [settings, setSettings] = useState({});
   const [receipt, setReceipt] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [showKeyboard, setShowKeyboard] = useState(false);
+  const [activeField, setActiveField] = useState(null);
 
   const logout = useCallback(() => {
     localStorage.removeItem('token');
@@ -64,7 +154,7 @@ const POS = () => {
   }, [token, fetchProducts, fetchSettings, logout]);
 
   const handleLogin = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     try {
       const res = await axios.post(`${API_URL}/auth/login`, { username, password });
       if (res.data.user.role !== 'pos' && res.data.user.role !== 'admin') {
@@ -78,6 +168,20 @@ const POS = () => {
     } catch (err) {
       setError(err.response?.data?.error || 'Erro no login');
     }
+  };
+
+  const handleVirtualKeyPress = (key) => {
+    if (activeField === 'username') setUsername(prev => prev + key);
+    if (activeField === 'password') setPassword(prev => prev + key);
+  };
+
+  const handleVirtualBackspace = () => {
+    if (activeField === 'username') setUsername(prev => prev.slice(0, -1));
+    if (activeField === 'password') setPassword(prev => prev.slice(0, -1));
+  };
+
+  const handleVirtualEnter = () => {
+    handleLogin();
   };
 
   useEffect(() => {
@@ -165,14 +269,37 @@ const POS = () => {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-blue-900 px-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-blue-900 px-4">
         <form onSubmit={handleLogin} className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm">
           <h2 className="text-3xl font-black mb-8 text-center text-blue-900 uppercase tracking-tighter">SmartWallet POS</h2>
           {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-6 text-sm font-bold border border-red-100">{error}</div>}
-          <input type="text" placeholder="Utilizador" className="w-full p-4 border-2 border-gray-100 rounded-xl mb-4 focus:border-blue-500 outline-none transition" value={username} onChange={e => setUsername(e.target.value)} />
-          <input type="password" placeholder="Password" className="w-full p-4 border-2 border-gray-100 rounded-xl mb-6 focus:border-blue-500 outline-none transition" value={password} onChange={e => setPassword(e.target.value)} />
+          <input
+            type="text"
+            placeholder="Utilizador"
+            className="w-full p-4 border-2 border-gray-100 rounded-xl mb-4 focus:border-blue-500 outline-none transition"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            onFocus={() => { setShowKeyboard(true); setActiveField('username'); }}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            className="w-full p-4 border-2 border-gray-100 rounded-xl mb-6 focus:border-blue-500 outline-none transition"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onFocus={() => { setShowKeyboard(true); setActiveField('password'); }}
+          />
           <button className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-lg hover:bg-blue-700 active:scale-95 transition transform">ENTRAR</button>
         </form>
+        {showKeyboard && (
+          <VirtualKeyboard
+            activeField={activeField}
+            onKeyPress={handleVirtualKeyPress}
+            onBackspace={handleVirtualBackspace}
+            onEnter={handleVirtualEnter}
+            onClose={() => { setShowKeyboard(false); setActiveField(null); }}
+          />
+        )}
       </div>
     );
   }
