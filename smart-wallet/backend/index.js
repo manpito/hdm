@@ -36,14 +36,23 @@ const MAX_POS_TERMINALS = parseInt(process.env.MAX_POS_TERMINALS || '2');
 
 const db = await initDb();
 
+const withDb = async (fn) => {
+    const release = await dbMutex.acquire();
+    try {
+        return await fn(db);
+    } finally {
+        release();
+    }
+};
+
 // --- Helper de Auditoria ---
 const logAction = async (req, action, entity, entity_id, details, amount = null) => {
   const user = req.user;
   const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  await db.run(
+  await withDb(db => db.run(
     'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [user.id, user.username, action, entity, entity_id, details, ip, amount]
-  );
+  ));
 };
 
 // --- Middleware de Autenticação ---
@@ -114,21 +123,21 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
   // Log login (precisamos do IP e User ID, req.user ainda não existe aqui)
   const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  await db.run(
+  await withDb(db => db.run(
     'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [user.id, user.username, 'LOGIN_SUCCESS', 'user', user.id, 'Login efetuado com sucesso', ip]
-  );
+  ));
 
   res.json({ token, user: { username: user.username, role: user.role, full_name: user.full_name } });
 });
 
-app.post('/api/auth/login-fail-log', async (req, res) => {
+app.post('/api/auth/login-fail-log', loginLimiter, async (req, res) => {
   const { username } = req.body;
   const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  await db.run(
+  await withDb(db => db.run(
     'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [0, username || 'unknown', 'LOGIN_FAILED', 'auth', null, 'Tentativa de login falhada', ip]
-  );
+  ));
   res.status(200).send();
 });
 
@@ -142,10 +151,10 @@ app.post('/api/users', authenticateToken, authorizeRoles(['admin']), async (req,
   const { username, password, role, full_name, terminal_id } = req.body;
   const hashedPassword = await bcrypt.hash(password, 10);
   try {
-    const result = await db.run(
+    const result = await withDb(db => db.run(
       'INSERT INTO users (username, password, role, full_name, terminal_id, is_active) VALUES (?, ?, ?, ?, ?, 1)',
       [username, hashedPassword, role, full_name, terminal_id]
-    );
+    ));
     await logAction(req, 'CREATE', 'user', result.lastID, `Criado utilizador: ${username}`);
     res.status(201).json({ message: 'User created' });
   } catch (err) {
@@ -159,13 +168,13 @@ app.put('/api/users/:id', authenticateToken, authorizeRoles(['admin']), async (r
 
   if (password) {
     const hashedPassword = await bcrypt.hash(password, 10);
-    await db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id]);
+    await withDb(db => db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, id]));
   }
 
-  await db.run(
+  await withDb(db => db.run(
     'UPDATE users SET full_name = ?, role = ?, terminal_id = ?, is_active = ? WHERE id = ?',
     [full_name, role, terminal_id, is_active, id]
-  );
+  ));
   await logAction(req, 'UPDATE', 'user', id, `Editado utilizador: ${full_name}`);
   res.json({ message: 'User updated' });
 });
@@ -178,7 +187,7 @@ app.get('/api/terminals', authenticateToken, authorizeRoles(['admin']), async (r
 
 app.post('/api/terminals', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { name, location } = req.body;
-  const result = await db.run('INSERT INTO terminals (name, location, is_active) VALUES (?, ?, 1)', [name, location]);
+  const result = await withDb(db => db.run('INSERT INTO terminals (name, location, is_active) VALUES (?, ?, 1)', [name, location]));
   await logAction(req, 'CREATE', 'terminal', result.lastID, `Criado terminal: ${name}`);
   res.status(201).json({ id: result.lastID, name, location, is_active: 1 });
 });
@@ -194,7 +203,7 @@ app.put('/api/terminals/:id', authenticateToken, authorizeRoles(['admin']), asyn
     }
   }
 
-  await db.run('UPDATE terminals SET name = ?, location = ?, is_active = ? WHERE id = ?', [name, location, is_active, id]);
+  await withDb(db => db.run('UPDATE terminals SET name = ?, location = ?, is_active = ? WHERE id = ?', [name, location, is_active, id]));
   await logAction(req, is_active ? 'UPDATE' : 'DEACTIVATE', 'terminal', id, `Terminal ${name} atualizado`);
   res.json({ message: 'Terminal updated' });
 });
@@ -207,10 +216,10 @@ app.get('/api/products', authenticateToken, async (req, res) => {
 
 app.post('/api/products', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { name, price, stock_quantity, image_base64, stock_minimum } = req.body;
-  const result = await db.run(
+  const result = await withDb(db => db.run(
     'INSERT INTO products (name, price, stock_quantity, image_base64, stock_minimum) VALUES (?, ?, ?, ?, ?)',
     [name, price, stock_quantity, image_base64, stock_minimum || 5]
-  );
+  ));
   await logAction(req, 'CREATE', 'product', result.lastID, `Criado produto: ${name}`);
   res.status(201).json({ id: result.lastID, name, price, stock_quantity });
 });
@@ -218,10 +227,10 @@ app.post('/api/products', authenticateToken, authorizeRoles(['admin']), async (r
 app.put('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { id } = req.params;
   const { name, price, stock_quantity, image_base64, stock_minimum } = req.body;
-  await db.run(
-    'UPDATE products SET name = ?, price = ?, stock_quantity = ?, image_base64 = ?, stock_minimum = ? WHERE id = ?',
-    [name, price, stock_quantity, image_base64, stock_minimum, id]
-  );
+  await withDb(db => db.run(
+    'UPDATE products SET name = ?, price = ?, stock_minimum = ?, image_base64 = ? WHERE id = ?',
+    [name, price, stock_minimum, image_base64, id]
+  ));
   await logAction(req, 'UPDATE', 'product', id, `Produto ${name} atualizado`);
   res.json({ id, name, price, stock_quantity });
 });
@@ -229,7 +238,7 @@ app.put('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async
 app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { id } = req.params;
   const product = await db.get('SELECT name FROM products WHERE id = ?', id);
-  await db.run('DELETE FROM products WHERE id = ?', id);
+  await withDb(db => db.run('DELETE FROM products WHERE id = ?', [id]));
   await logAction(req, 'DELETE', 'product', id, `Eliminado produto: ${product?.name}`);
   res.status(204).send();
 });
@@ -267,10 +276,10 @@ app.get('/api/cards/:id', authenticateToken, authorizeRoles(['admin', 'financeir
 app.post('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { id, owner_name, entity, price_paid } = req.body;
   try {
-    await db.run(
+    await withDb(db => db.run(
       'INSERT INTO cards (id, owner_name, entity, price_paid, balance, is_active) VALUES (?, ?, ?, ?, 0, 1)',
       [id, owner_name, entity, price_paid]
-    );
+    ));
     await logAction(req, 'ISSUE_CARD', 'card', id, `Emissão de cartão para ${owner_name}`);
     res.status(201).json({ id, owner_name, entity, price_paid });
   } catch (err) {
@@ -283,7 +292,7 @@ app.put('/api/cards/:id/cancel', authenticateToken, authorizeRoles(['admin', 'fi
   const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
   if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
 
-  await db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', id);
+  await withDb(db => db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', [id]));
   await logAction(req, 'CANCEL_CARD', 'card', id, `Cartão de ${card.owner_name} cancelado`);
   res.json({ message: 'Cartão cancelado' });
 });
@@ -293,7 +302,7 @@ app.put('/api/cards/:id/edit', authenticateToken, authorizeRoles(['admin', 'fina
     const { owner_name, entity } = req.body;
     const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
     if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
-    await db.run('UPDATE cards SET owner_name = ?, entity = ? WHERE id = ?', [owner_name, entity, id]);
+    await withDb(db => db.run('UPDATE cards SET owner_name = ?, entity = ? WHERE id = ?', [owner_name, entity, id]));
     await logAction(req, 'UPDATE_CARD', 'card', id, `Cartão actualizado: nome="${owner_name}", entidade="${entity}"`);
     res.json({ message: 'Cartão actualizado' });
 });
@@ -646,7 +655,7 @@ app.put('/api/settings', authenticateToken, authorizeRoles(['admin']), async (re
   const updates = req.body;
   for (const [key, value] of Object.entries(updates)) {
     if (key !== 'maxPosTerminals') { // Protegido via ENV
-      await db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]);
+      await withDb(db => db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]));
     }
   }
   await logAction(req, 'UPDATE', 'settings', 'global', 'Definições do sistema atualizadas');
