@@ -250,21 +250,33 @@ app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), as
 
 app.post('/api/products/:id/stock', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
     const { id } = req.params;
-    const delta = Number(req.body.delta);
+    const delta = req.body.delta;
 
-    if (!Number.isFinite(delta) || delta === 0) {
-        return res.status(400).json({ error: 'delta deve ser um número diferente de zero' });
+    if (!Number.isInteger(delta) || delta === 0) {
+        return res.status(400).json({ error: 'delta deve ser um número inteiro diferente de zero' });
     }
 
-    await withDb(async db => {
-        const product = await db.get('SELECT * FROM products WHERE id = ?', id);
-        if (!product) throw Object.assign(new Error('Produto não encontrado'), { status: 404 });
+    try {
+        await withDb(async db => {
+            const product = await db.get('SELECT * FROM products WHERE id = ?', id);
+            if (!product) {
+                const err = new Error('Produto não encontrado');
+                err.status = 404;
+                throw err;
+            }
 
-        const newStock = product.stock_quantity + delta;
-        if (newStock < 0) throw Object.assign(new Error('Stock não pode ficar negativo'), { status: 400 });
+            const newStock = product.stock_quantity + delta;
+            if (newStock < 0) {
+                const err = new Error('Stock não pode ficar negativo');
+                err.status = 400;
+                throw err;
+            }
 
-        await db.run('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?', [delta, id]);
-    });
+            await db.run('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?', [delta, id]);
+        });
+    } catch (err) {
+        return res.status(err.status || 500).json({ error: err.message || 'Erro ao ajustar stock' });
+    }
 
     const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', id);
     await logAction(req, 'STOCK_ADJUST', 'product', id, `Ajuste de stock: ${delta > 0 ? '+' : ''}${delta} un.`);
