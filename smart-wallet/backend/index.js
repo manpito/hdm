@@ -6,8 +6,11 @@ import { initDb } from './db.js';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { Mutex } from 'async-mutex';
 
 dotenv.config();
+
+const saleMutex = new Mutex();
 
 const app = express();
 app.use(helmet());
@@ -411,6 +414,7 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
       return res.status(400).json({ error: 'card_id inválido' });
   }
 
+  const release = await saleMutex.acquire();
   try {
     await db.run('BEGIN TRANSACTION');
     const card = await db.get('SELECT * FROM cards WHERE id = ?', card_id);
@@ -454,6 +458,8 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
   } catch (error) {
     await db.run('ROLLBACK');
     res.status(500).json({ error: 'Erro no processamento da venda' });
+  } finally {
+    release();
   }
 });
 
