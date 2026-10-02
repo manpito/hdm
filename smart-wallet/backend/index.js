@@ -10,7 +10,7 @@ import { Mutex } from 'async-mutex';
 
 dotenv.config();
 
-const saleMutex = new Mutex();
+const dbMutex = new Mutex();
 
 const app = express();
 app.use(helmet());
@@ -301,6 +301,7 @@ app.put('/api/cards/:id/edit', authenticateToken, authorizeRoles(['admin', 'fina
 app.post('/api/cards/transfer', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
     const { old_id, new_id } = req.body;
 
+    const release = await dbMutex.acquire();
     try {
         await db.run('BEGIN TRANSACTION');
 
@@ -332,25 +333,40 @@ app.post('/api/cards/transfer', authenticateToken, authorizeRoles(['admin', 'fin
 
         await db.run('COMMIT');
         res.json({ message: 'Saldo transferido', transferred_balance, new_balance });
-    } catch (error) {
+    } catch (err) {
         await db.run('ROLLBACK');
-        res.status(500).json({ error: 'Erro ao transferir saldo' });
+        res.status(500).json({ error: 'Erro na transferência' });
+    } finally {
+        release();
     }
 });
 
 app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const { id } = req.body; const amount = Number(req.body.amount);
-  const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
-  if (card) {
-    const newBalance = card.balance + amount;
-    await db.run('UPDATE cards SET balance = ?, is_active = 1 WHERE id = ?', [newBalance, id]);
-    await logAction(req, 'RECHARGE', 'card', id, `Carregamento de ${amount} un.`, amount);
-    res.json({ id, balance: newBalance });
-  } else {
-    // Caso de uso: Carregamento de cartão não emitido previamente (legado ou simplificado)
-    await db.run('INSERT INTO cards (id, balance, is_active) VALUES (?, ?, 1)', [id, amount]);
-    await logAction(req, 'CREATE_RECHARGE', 'card', id, `Novo cartão carregado com ${amount} un.`, amount);
-    res.json({ id, balance: amount });
+  const { id } = req.body;
+  const amount = Number(req.body.amount);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'O valor de carregamento deve ser um número positivo' });
+  }
+
+  const release = await dbMutex.acquire();
+  try {
+    const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
+    if (card) {
+      await db.run('UPDATE cards SET balance = balance + ?, is_active = 1 WHERE id = ?', [amount, id]);
+      const updatedCard = await db.get('SELECT balance FROM cards WHERE id = ?', id);
+      await logAction(req, 'RECHARGE', 'card', id, `Carregamento de ${amount} un.`, amount);
+      res.json({ id, balance: updatedCard.balance });
+    } else {
+      // Caso de uso: Carregamento de cartão não emitido previamente (legado ou simplificado)
+      await db.run('INSERT INTO cards (id, balance, is_active) VALUES (?, ?, 1)', [id, amount]);
+      await logAction(req, 'CREATE_RECHARGE', 'card', id, `Novo cartão carregado com ${amount} un.`, amount);
+      res.json({ id, balance: amount });
+    }
+  } catch (err) {
+      res.status(500).json({ error: 'Erro no carregamento' });
+  } finally {
+      release();
   }
 });
 
@@ -366,6 +382,7 @@ app.post('/api/cards/bulk-import', authenticateToken, authorizeRoles(['admin', '
     errors: []
   };
 
+  const release = await dbMutex.acquire();
   try {
     await db.run('BEGIN TRANSACTION');
     for (const card of cards) {
@@ -385,9 +402,11 @@ app.post('/api/cards/bulk-import', authenticateToken, authorizeRoles(['admin', '
     }
     await db.run('COMMIT');
     res.json(results);
-  } catch (error) {
+  } catch (err) {
     await db.run('ROLLBACK');
-    res.status(500).json({ error: 'Erro no processamento da importação em massa' });
+    res.status(500).json({ error: 'Erro na importação' });
+  } finally {
+    release();
   }
 });
 
@@ -414,7 +433,7 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
       return res.status(400).json({ error: 'card_id inválido' });
   }
 
-  const release = await saleMutex.acquire();
+  const release = await dbMutex.acquire();
   try {
     await db.run('BEGIN TRANSACTION');
     const card = await db.get('SELECT * FROM cards WHERE id = ?', card_id);
