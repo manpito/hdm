@@ -383,6 +383,7 @@ const StockManagement = () => {
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' });
   const [editingId, setEditingId] = useState(null);
+  const [stockAdjust, setStockAdjust] = useState('');
 
   const fetchStock = () => {
     axios.get(`${API_URL}/products`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => setProducts(res.data));
@@ -407,7 +408,22 @@ const StockManagement = () => {
     else await axios.post(`${API_URL}/products`, payload, config);
     setEditingId(null);
     setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' });
+    setStockAdjust('');
     fetchStock();
+  };
+
+  const adjustStock = async (isPositive) => {
+    const val = Number(stockAdjust);
+    if (!val || val <= 0) return;
+    const delta = isPositive ? val : -val;
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    try {
+      await axios.post(`${API_URL}/products/${editingId}/stock`, { delta }, config);
+      setStockAdjust('');
+      fetchStock();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao ajustar stock');
+    }
   };
 
   const exportCSV = () => {
@@ -431,7 +447,16 @@ const StockManagement = () => {
         <h3 className="col-span-4 font-bold border-b pb-2">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
         <input placeholder="Nome" className="p-2 border rounded col-span-2" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
         <input placeholder="Preço (un.)" type="number" step="0.01" className="p-2 border rounded" value={form.price} onChange={e => setForm({...form, price: e.target.value})} required />
-        <input placeholder="Stock Inicial" type="number" className="p-2 border rounded" value={form.stock_quantity} onChange={e => setForm({...form, stock_quantity: e.target.value})} required />
+        {!editingId && (
+          <input placeholder="Stock Inicial" type="number" className="p-2 border rounded" value={form.stock_quantity} onChange={e => setForm({...form, stock_quantity: e.target.value})} required />
+        )}
+        {editingId && (
+          <div className="flex gap-2 items-center">
+            <input placeholder="Ajustar Stock" type="number" min="1" className="p-2 border rounded w-full" value={stockAdjust} onChange={e => setStockAdjust(e.target.value)} />
+            <button type="button" onClick={() => adjustStock(true)} className="bg-green-600 text-white font-bold p-2 rounded hover:bg-green-700 whitespace-nowrap">+ Entrada</button>
+            <button type="button" onClick={() => adjustStock(false)} className="bg-red-600 text-white font-bold p-2 rounded hover:bg-red-700 whitespace-nowrap">− Saída</button>
+          </div>
+        )}
         <div className="col-span-2 flex flex-col gap-1">
           <label className="text-xs text-gray-500 font-bold uppercase">Stock Mínimo (Alerta)</label>
           <input placeholder="Stock Mínimo" type="number" className="p-2 border rounded w-full" value={form.stock_minimum} onChange={e => setForm({...form, stock_minimum: e.target.value})} required />
@@ -449,7 +474,7 @@ const StockManagement = () => {
         <button className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-bold col-span-4 transition shadow-md">
           {editingId ? 'Atualizar Produto' : 'Criar Produto'}
         </button>
-        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' })}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
+        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' }); setStockAdjust('');}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
       </form>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
