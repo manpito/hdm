@@ -46,13 +46,17 @@ const withDb = async (fn) => {
 };
 
 // --- Helper de Auditoria ---
+const logActionUnlocked = async (db, req, action, entity, entity_id, details, amount = null) => {
+    const user = req.user;
+    const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    await db.run(
+        'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [user.id, user.username, action, entity, entity_id, details, ip, amount]
+    );
+};
+
 const logAction = async (req, action, entity, entity_id, details, amount = null) => {
-  const user = req.user;
-  const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  await withDb(db => db.run(
-    'INSERT INTO audit_logs (user_id, username, action, entity, entity_id, details, ip_address, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [user.id, user.username, action, entity, entity_id, details, ip, amount]
-  ));
+    await withDb(db => logActionUnlocked(db, req, action, entity, entity_id, details, amount));
 };
 
 // --- Middleware de Autenticação ---
@@ -244,6 +248,29 @@ app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), as
   res.status(204).send();
 });
 
+app.post('/api/products/:id/stock', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+    const { id } = req.params;
+    const delta = Number(req.body.delta);
+
+    if (!Number.isFinite(delta) || delta === 0) {
+        return res.status(400).json({ error: 'delta deve ser um número diferente de zero' });
+    }
+
+    await withDb(async db => {
+        const product = await db.get('SELECT * FROM products WHERE id = ?', id);
+        if (!product) throw Object.assign(new Error('Produto não encontrado'), { status: 404 });
+
+        const newStock = product.stock_quantity + delta;
+        if (newStock < 0) throw Object.assign(new Error('Stock não pode ficar negativo'), { status: 400 });
+
+        await db.run('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?', [delta, id]);
+    });
+
+    const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', id);
+    await logAction(req, 'STOCK_ADJUST', 'product', id, `Ajuste de stock: ${delta > 0 ? '+' : ''}${delta} un.`);
+    res.json(updatedProduct);
+});
+
 // --- Cartões (Admin e Financeiro) ---
 app.get('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { owner_name, is_active, entity } = req.query;
@@ -338,8 +365,8 @@ app.post('/api/cards/transfer', authenticateToken, authorizeRoles(['admin', 'fin
         await db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', [old_id]);
         await db.run('UPDATE cards SET balance = ? WHERE id = ?', [new_balance, new_id]);
 
-        await logAction(req, 'TRANSFER_OUT', 'card', old_id, transferred_balance);
-        await logAction(req, 'TRANSFER_IN', 'card', new_id, transferred_balance);
+        await logActionUnlocked(db, req, 'TRANSFER_OUT', 'card', old_id, transferred_balance);
+        await logActionUnlocked(db, req, 'TRANSFER_IN', 'card', new_id, transferred_balance);
 
         await db.run('COMMIT');
         res.json({ message: 'Saldo transferido', transferred_balance, new_balance });
@@ -365,12 +392,12 @@ app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'fin
     if (card) {
       await db.run('UPDATE cards SET balance = balance + ?, is_active = 1 WHERE id = ?', [amount, id]);
       const updatedCard = await db.get('SELECT balance FROM cards WHERE id = ?', id);
-      await logAction(req, 'RECHARGE', 'card', id, `Carregamento de ${amount} un.`, amount);
+      await logActionUnlocked(db, req, 'RECHARGE', 'card', id, `Carregamento de ${amount} un.`, amount);
       res.json({ id, balance: updatedCard.balance });
     } else {
       // Caso de uso: Carregamento de cartão não emitido previamente (legado ou simplificado)
       await db.run('INSERT INTO cards (id, balance, is_active) VALUES (?, ?, 1)', [id, amount]);
-      await logAction(req, 'CREATE_RECHARGE', 'card', id, `Novo cartão carregado com ${amount} un.`, amount);
+      await logActionUnlocked(db, req, 'CREATE_RECHARGE', 'card', id, `Novo cartão carregado com ${amount} un.`, amount);
       res.json({ id, balance: amount });
     }
   } catch (err) {
@@ -403,7 +430,7 @@ app.post('/api/cards/bulk-import', authenticateToken, authorizeRoles(['admin', '
           [uid, owner_name, entity, price_paid, balance]
         );
         // Regista nos audit_logs como "Migração de Sistema"
-        await logAction(req, 'RECHARGE', 'card', uid, 'Migração de Sistema', balance);
+        await logActionUnlocked(db, req, 'RECHARGE', 'card', uid, 'Migração de Sistema', balance);
         results.success++;
       } catch (err) {
         results.failed++;
@@ -478,7 +505,7 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
     const newBalance = card.balance - totalCartPrice;
     await db.run('UPDATE cards SET balance = ? WHERE id = ?', [newBalance, card_id]);
     await db.run('COMMIT');
-    await logAction(req, 'SALE', 'sale', card_id, `Venda realizada: ${totalCartPrice.toFixed(2)} un. no cartão ${card_id}`, totalCartPrice);
+    await logActionUnlocked(db, req, 'SALE', 'sale', card_id, `Venda realizada: ${totalCartPrice.toFixed(2)} un. no cartão ${card_id}`, totalCartPrice);
     res.status(201).json({
       message: 'Venda realizada com sucesso',
       id: lastSaleId,
