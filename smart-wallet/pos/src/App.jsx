@@ -18,6 +18,7 @@ const VirtualKeyboard = ({ activeField, onKeyPress, onBackspace, onEnter, onClos
     ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
     ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
     ['-', '_', '=', '+', '[', ']', '{', '}', ';', "'"],
+    ['.', ',', '/', '?', ':', '"', '<', '>', '\\', '|'],
     ['ABC', ' ', 'Enter']
   ];
 
@@ -188,7 +189,7 @@ const POS = () => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (error.response?.status === 401) {
+        if (error.response?.status === 401 && !error.config?.url?.endsWith('/auth/login')) {
             localStorage.removeItem('token');
             localStorage.removeItem('user');
             window.location.href = '/';
