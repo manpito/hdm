@@ -232,7 +232,8 @@ app.put('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async
     [name, price, stock_minimum, image_base64, id]
   ));
   await logAction(req, 'UPDATE', 'product', id, `Produto ${name} atualizado`);
-  res.json({ id, name, price, stock_quantity });
+  const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', id);
+  res.json(updatedProduct);
 });
 
 app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
