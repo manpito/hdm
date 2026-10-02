@@ -13,6 +13,7 @@ dotenv.config();
 const dbMutex = new Mutex();
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
     origin: [
@@ -66,7 +67,7 @@ const authenticateToken = (req, res, next) => {
   if (!token) return res.sendStatus(401);
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.sendStatus(403);
+    if (err) return res.sendStatus(401);
     req.user = user;
     next();
   });
@@ -88,6 +89,14 @@ const loginLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Demasiadas tentativas de login. Tente novamente em 15 minutos.' }
+});
+
+const failLogLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Demasiados pedidos.' }
 });
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
@@ -135,7 +144,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   res.json({ token, user: { username: user.username, role: user.role, full_name: user.full_name } });
 });
 
-app.post('/api/auth/login-fail-log', loginLimiter, async (req, res) => {
+app.post('/api/auth/login-fail-log', failLogLimiter, async (req, res) => {
   const { username } = req.body;
   const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   await withDb(db => db.run(
