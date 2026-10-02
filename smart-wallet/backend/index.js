@@ -393,6 +393,24 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
   const { card_id, items } = req.body;
   const terminal_id = req.user.terminal_id;
 
+  // Validação dos items
+  if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'items deve ser um array não vazio' });
+  }
+
+  for (const item of items) {
+      if (!Number.isInteger(item.product_id) || item.product_id <= 0) {
+          return res.status(400).json({ error: 'Cada item deve ter um product_id numérico válido' });
+      }
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+          return res.status(400).json({ error: 'A quantidade de cada item deve ser um número inteiro positivo' });
+      }
+  }
+
+  if (!card_id || typeof card_id !== 'string' || card_id.trim() === '') {
+      return res.status(400).json({ error: 'card_id inválido' });
+  }
+
   try {
     await db.run('BEGIN TRANSACTION');
     const card = await db.get('SELECT * FROM cards WHERE id = ?', card_id);
