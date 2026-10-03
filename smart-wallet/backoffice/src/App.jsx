@@ -15,7 +15,8 @@ import {
   Trash2,
   Edit,
   Download,
-  Search
+  Search,
+  Tag
 } from 'lucide-react';
 import axios from 'axios';
 import { API_URL } from './config';
@@ -140,6 +141,7 @@ const Layout = ({ children }) => {
     { label: 'Utilizadores', icon: <Users size={20}/>, path: '/users', roles: ['admin'] },
     { label: 'Terminais', icon: <Monitor size={20}/>, path: '/terminals', roles: ['admin'] },
     { label: 'Stock', icon: <Package size={20}/>, path: '/stock', roles: ['admin'] },
+    { label: 'Categorias', icon: <Tag size={20}/>, path: '/categories', roles: ['admin'] },
     { label: 'Cartões', icon: <CreditCard size={20}/>, path: '/cards', roles: ['admin', 'financeiro'] },
     { label: 'Relatórios', icon: <BarChart3 size={20}/>, path: '/reports', roles: ['admin', 'financeiro'] },
     { label: 'Logs', icon: <Search size={20}/>, path: '/logs', roles: ['admin'] },
@@ -378,15 +380,133 @@ const TerminalsManagement = () => {
   );
 };
 
+// --- Categories Management ---
+const CategoriesManagement = () => {
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [form, setForm] = useState({ name: '', color: '#2563eb', sort_order: 0 });
+  const [editingId, setEditingId] = useState(null);
+
+  const fetchData = () => {
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    axios.get(`${API_URL}/categories`, config).then(res => setCategories(res.data));
+    axios.get(`${API_URL}/products`, config).then(res => setProducts(res.data));
+  };
+
+  React.useEffect(fetchData, []);
+
+  const saveCategory = async (e) => {
+    e.preventDefault();
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    const payload = { ...form, sort_order: Number(form.sort_order) };
+
+    try {
+      if (editingId) {
+        await axios.put(`${API_URL}/categories/${editingId}`, payload, config);
+      } else {
+        await axios.post(`${API_URL}/categories`, payload, config);
+      }
+      setEditingId(null);
+      setForm({ name: '', color: '#2563eb', sort_order: 0 });
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao guardar categoria');
+    }
+  };
+
+  const deleteCategory = async (id) => {
+    if (!window.confirm('Tem a certeza que deseja eliminar esta categoria?')) return;
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    try {
+      await axios.delete(`${API_URL}/categories/${id}`, config);
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao eliminar categoria');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={saveCategory} className="bg-white p-6 rounded shadow-sm border grid grid-cols-4 gap-4">
+        <h3 className="col-span-4 font-bold border-b pb-2">{editingId ? 'Editar Categoria' : 'Nova Categoria'}</h3>
+
+        <div className="col-span-2 flex flex-col gap-1">
+          <label className="text-xs text-gray-500 font-bold uppercase">Nome</label>
+          <input placeholder="Nome" className="p-2 border rounded w-full" value={form.name} onChange={e => setForm({...form, name: e.target.value})} maxLength={50} required />
+        </div>
+
+        <div className="col-span-1 flex flex-col gap-1">
+          <label className="text-xs text-gray-500 font-bold uppercase">Cor</label>
+          <input type="color" className="p-1 border rounded w-full h-10" value={form.color} onChange={e => setForm({...form, color: e.target.value})} />
+        </div>
+
+        <div className="col-span-1 flex flex-col gap-1">
+          <label className="text-xs text-gray-500 font-bold uppercase">Ordem</label>
+          <input placeholder="Ordem" type="number" min="0" className="p-2 border rounded w-full" value={form.sort_order} onChange={e => setForm({...form, sort_order: e.target.value})} />
+        </div>
+
+        <button className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-bold col-span-4 transition shadow-md">
+          {editingId ? 'Guardar' : 'Criar'}
+        </button>
+        {editingId && (
+          <button type="button" onClick={() => { setEditingId(null); setForm({ name: '', color: '#2563eb', sort_order: 0 }); }} className="col-span-4 text-gray-500 text-sm hover:underline">
+            Cancelar edição
+          </button>
+        )}
+      </form>
+
+      <table className="w-full bg-white border rounded shadow-sm">
+        <thead className="bg-gray-100 border-b">
+          <tr>
+            <th className="p-3 text-left w-12">Cor</th>
+            <th className="p-3 text-left">Nome</th>
+            <th className="p-3 text-left">Ordem</th>
+            <th className="p-3 text-center">Nº Produtos</th>
+            <th className="p-3 text-right">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {categories.map(c => {
+            const numProducts = products.filter(p => p.category_id === c.id).length;
+            return (
+              <tr key={c.id} className="border-b hover:bg-gray-50">
+                <td className="p-3">
+                  <div className="w-6 h-6 rounded border" style={{ backgroundColor: c.color }}></div>
+                </td>
+                <td className="p-3 font-bold">{c.name}</td>
+                <td className="p-3">{c.sort_order}</td>
+                <td className="p-3 text-center">
+                  <span className="px-2 py-1 bg-gray-200 rounded text-xs">{numProducts}</span>
+                </td>
+                <td className="p-3 text-right flex justify-end gap-2">
+                  <button onClick={() => { setEditingId(c.id); setForm({ name: c.name, color: c.color, sort_order: c.sort_order }); }} className="text-blue-600 hover:bg-blue-50 p-2 rounded-full transition">
+                    <Edit size={18} />
+                  </button>
+                  <button onClick={() => deleteCategory(c.id)} className="text-red-600 hover:bg-red-50 p-2 rounded-full transition">
+                    <Trash2 size={18} />
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 // --- Stock Management ---
 const StockManagement = () => {
   const [products, setProducts] = useState([]);
-  const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' });
+  const [categories, setCategories] = useState([]);
+  const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null });
   const [editingId, setEditingId] = useState(null);
   const [stockAdjust, setStockAdjust] = useState('');
 
   const fetchStock = () => {
-    axios.get(`${API_URL}/products`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(res => setProducts(res.data));
+    const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
+    axios.get(`${API_URL}/products`, config).then(res => setProducts(res.data));
+    axios.get(`${API_URL}/categories`, config).then(res => setCategories(res.data));
   };
   React.useEffect(fetchStock, []);
 
@@ -403,11 +523,17 @@ const StockManagement = () => {
   const saveProduct = async (e) => {
     e.preventDefault();
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
-    const payload = { ...form, price: Number(form.price), stock_quantity: Number(form.stock_quantity), stock_minimum: Number(form.stock_minimum) };
+    const payload = {
+        ...form,
+        price: Number(form.price),
+        stock_quantity: Number(form.stock_quantity),
+        stock_minimum: Number(form.stock_minimum),
+        category_id: form.category_id ? Number(form.category_id) : null
+    };
     if (editingId) await axios.put(`${API_URL}/products/${editingId}`, payload, config);
     else await axios.post(`${API_URL}/products`, payload, config);
     setEditingId(null);
-    setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' });
+    setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null });
     setStockAdjust('');
     fetchStock();
   };
@@ -447,6 +573,12 @@ const StockManagement = () => {
         <h3 className="col-span-4 font-bold border-b pb-2">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
         <input placeholder="Nome" className="p-2 border rounded col-span-2" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
         <input placeholder="Preço (un.)" type="number" step="0.01" className="p-2 border rounded" value={form.price} onChange={e => setForm({...form, price: e.target.value})} required />
+
+        <select className="p-2 border rounded" value={form.category_id || ''} onChange={e => setForm({...form, category_id: e.target.value || null})}>
+          <option value="">Sem categoria</option>
+          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+
         {!editingId && (
           <input placeholder="Stock Inicial" type="number" className="p-2 border rounded" value={form.stock_quantity} onChange={e => setForm({...form, stock_quantity: e.target.value})} required />
         )}
@@ -474,11 +606,13 @@ const StockManagement = () => {
         <button className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-bold col-span-4 transition shadow-md">
           {editingId ? 'Atualizar Produto' : 'Criar Produto'}
         </button>
-        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '' }); setStockAdjust('');}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
+        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null }); setStockAdjust('');}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
       </form>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {products.map(p => (
+        {products.map(p => {
+          const cat = categories.find(c => c.id === p.category_id);
+          return (
           <div key={p.id} className="bg-white p-4 border rounded-xl shadow-sm flex gap-4 items-center hover:shadow-md transition">
             <div className="relative">
               {p.image_base64 ? <img src={p.image_base64} className="w-20 h-20 object-cover rounded-lg border" /> : <div className="w-20 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-gray-300 text-[10px] text-center px-1 font-bold">SEM IMAGEM</div>}
@@ -486,6 +620,7 @@ const StockManagement = () => {
             </div>
             <div className="flex-1">
               <h4 className="font-bold text-gray-800 leading-tight">{p.name}</h4>
+              <p className="text-xs font-bold text-gray-500 uppercase">{cat ? cat.name : '—'}</p>
               <p className="text-blue-600 font-black">{Number(p.price).toFixed(2)} <span className="text-[10px] uppercase">un.</span></p>
               <div className="flex items-center gap-2 mt-1">
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.stock_quantity < p.stock_minimum ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
@@ -496,7 +631,7 @@ const StockManagement = () => {
             </div>
             <button onClick={() => {setEditingId(p.id); setForm(p)}} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition"><Edit size={18}/></button>
           </div>
-        ))}
+        )})}
       </div>
     </div>
   );
@@ -1423,6 +1558,7 @@ function App() {
         <Route path="/users" element={<ProtectedRoute allowedRoles={['admin']}><Layout><UsersManagement /></Layout></ProtectedRoute>} />
         <Route path="/terminals" element={<ProtectedRoute allowedRoles={['admin']}><Layout><TerminalsManagement /></Layout></ProtectedRoute>} />
         <Route path="/stock" element={<ProtectedRoute allowedRoles={['admin']}><Layout><StockManagement /></Layout></ProtectedRoute>} />
+        <Route path="/categories" element={<ProtectedRoute allowedRoles={['admin']}><Layout><CategoriesManagement /></Layout></ProtectedRoute>} />
         <Route path="/cards" element={<ProtectedRoute allowedRoles={['admin', 'financeiro']}><Layout><CardsManagement /></Layout></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute allowedRoles={['admin', 'financeiro']}><Layout><Reports /></Layout></ProtectedRoute>} />
         <Route path="/logs" element={<ProtectedRoute allowedRoles={['admin']}><Layout><AuditLogs /></Layout></ProtectedRoute>} />

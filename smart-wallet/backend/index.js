@@ -221,6 +221,30 @@ app.put('/api/terminals/:id', authenticateToken, authorizeRoles(['admin']), asyn
   res.json({ message: 'Terminal updated' });
 });
 
+// --- Validation Helper ---
+function validateCategory(body, partial = false) {
+    const { name, color, sort_order } = body;
+
+    if (!partial || 'name' in body) {
+        if (typeof name !== 'string' || name.trim().length < 1 || name.trim().length > 50) {
+            return { error: 'O nome da categoria deve ter entre 1 e 50 caracteres.' };
+        }
+    }
+    if ('color' in body && color !== undefined && color !== null) {
+        if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
+            return { error: 'A cor deve estar no formato hexadecimal (ex: #2563eb).' };
+        }
+    }
+    if ('sort_order' in body && sort_order !== undefined && sort_order !== null) {
+        const order = Number(sort_order);
+        if (!Number.isInteger(order) || order < 0) {
+            return { error: 'A ordem (sort_order) deve ser um número inteiro maior ou igual a 0.' };
+        }
+    }
+
+    return null;
+}
+
 // --- Produtos (Gestão: Admin | Listagem: Todos) ---
 app.get('/api/products', authenticateToken, async (req, res) => {
   const products = await db.all('SELECT * FROM products');
@@ -228,25 +252,83 @@ app.get('/api/products', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/products', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
-  const { name, price, stock_quantity, image_base64, stock_minimum } = req.body;
-  const result = await withDb(db => db.run(
-    'INSERT INTO products (name, price, stock_quantity, image_base64, stock_minimum) VALUES (?, ?, ?, ?, ?)',
-    [name, price, stock_quantity, image_base64, stock_minimum || 5]
-  ));
-  await logAction(req, 'CREATE', 'product', result.lastID, `Criado produto: ${name}`);
-  res.status(201).json({ id: result.lastID, name, price, stock_quantity });
+  const { name, price, stock_quantity, image_base64, stock_minimum, category_id } = req.body;
+  let finalCategoryId = null;
+
+  if (category_id !== undefined && category_id !== null && category_id !== '') {
+      finalCategoryId = Number(category_id);
+      if (!Number.isInteger(finalCategoryId)) {
+          return res.status(400).json({ error: 'Categoria inválida.' });
+      }
+  }
+
+  try {
+      const result = await withDb(async (db) => {
+          if (finalCategoryId !== null) {
+              const category = await db.get('SELECT id FROM categories WHERE id = ?', finalCategoryId);
+              if (!category) {
+                  throw { status: 400, message: 'Categoria inválida.' };
+              }
+          }
+
+          const resDb = await db.run(
+              'INSERT INTO products (name, price, stock_quantity, image_base64, stock_minimum, category_id) VALUES (?, ?, ?, ?, ?, ?)',
+              [name, price, stock_quantity, image_base64, stock_minimum || 5, finalCategoryId]
+          );
+          await logActionUnlocked(db, req, 'CREATE', 'product', resDb.lastID, `Criado produto: ${name}`);
+          return resDb;
+      });
+      res.status(201).json({ id: result.lastID, name, price, stock_quantity, category_id: finalCategoryId });
+  } catch (error) {
+      if (error.status) {
+          return res.status(error.status).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
 app.put('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const { id } = req.params;
   const { name, price, stock_quantity, image_base64, stock_minimum } = req.body;
-  await withDb(db => db.run(
-    'UPDATE products SET name = ?, price = ?, stock_minimum = ?, image_base64 = ? WHERE id = ?',
-    [name, price, stock_minimum, image_base64, id]
-  ));
-  await logAction(req, 'UPDATE', 'product', id, `Produto ${name} atualizado`);
-  const updatedProduct = await db.get('SELECT * FROM products WHERE id = ?', id);
-  res.json(updatedProduct);
+
+  try {
+      await withDb(async (db) => {
+          let updateQuery = 'UPDATE products SET name = ?, price = ?, stock_minimum = ?, image_base64 = ?';
+          const queryParams = [name, price, stock_minimum, image_base64];
+
+          if ('category_id' in req.body) {
+              const { category_id } = req.body;
+              let finalCategoryId = null;
+
+              if (category_id !== undefined && category_id !== null && category_id !== '') {
+                  finalCategoryId = Number(category_id);
+                  if (!Number.isInteger(finalCategoryId)) {
+                      throw { status: 400, message: 'Categoria inválida.' };
+                  }
+                  const category = await db.get('SELECT id FROM categories WHERE id = ?', finalCategoryId);
+                  if (!category) {
+                      throw { status: 400, message: 'Categoria inválida.' };
+                  }
+              }
+              updateQuery += ', category_id = ?';
+              queryParams.push(finalCategoryId);
+          }
+
+          updateQuery += ' WHERE id = ?';
+          queryParams.push(id);
+
+          await db.run(updateQuery, queryParams);
+          await logActionUnlocked(db, req, 'UPDATE', 'product', id, `Produto ${name} atualizado`);
+      });
+
+      const updatedProduct = await withDb(db => db.get('SELECT * FROM products WHERE id = ?', id));
+      res.json(updatedProduct);
+  } catch (error) {
+      if (error.status) {
+          return res.status(error.status).json({ error: error.message });
+      }
+      res.status(500).json({ error: 'Erro interno' });
+  }
 });
 
 app.delete('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
@@ -539,6 +621,127 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
   } finally {
     release();
   }
+});
+
+// --- Categorias ---
+app.get('/api/categories', authenticateToken, async (req, res) => {
+    try {
+        const categories = await db.all('SELECT * FROM categories ORDER BY sort_order ASC, name ASC');
+        res.json(categories);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro interno ao processar categoria.' });
+    }
+});
+
+app.post('/api/categories', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+    try {
+        const validationError = validateCategory(req.body);
+        if (validationError) {
+            return res.status(400).json(validationError);
+        }
+
+        const { name, color, sort_order } = req.body;
+        const trimmedName = name.trim();
+        const finalColor = color || '#2563eb';
+        const finalSortOrder = sort_order !== undefined ? Number(sort_order) : 0;
+
+        await withDb(async (db) => {
+            const existing = await db.get('SELECT id FROM categories WHERE name = ? COLLATE NOCASE', trimmedName);
+            if (existing) {
+                throw { status: 409, message: 'Já existe uma categoria com esse nome.' };
+            }
+
+            const result = await db.run(
+                'INSERT INTO categories (name, color, sort_order) VALUES (?, ?, ?)',
+                [trimmedName, finalColor, finalSortOrder]
+            );
+            await logActionUnlocked(db, req, 'CREATE', 'category', result.lastID, `Criada categoria: ${trimmedName}`);
+
+            res.status(201).json({ id: result.lastID, name: trimmedName, color: finalColor, sort_order: finalSortOrder });
+        });
+    } catch (error) {
+        if (error.status) {
+            return res.status(error.status).json({ error: error.message });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Erro interno ao processar categoria.' });
+    }
+});
+
+app.put('/api/categories/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const validationError = validateCategory(req.body, true);
+        if (validationError) {
+            return res.status(400).json(validationError);
+        }
+
+        await withDb(async (db) => {
+            const category = await db.get('SELECT * FROM categories WHERE id = ?', id);
+            if (!category) {
+                throw { status: 404, message: 'Categoria não encontrada.' };
+            }
+
+            const { name, color, sort_order } = req.body;
+            const newName = name !== undefined ? name.trim() : category.name;
+            const newColor = color !== undefined ? color : category.color;
+            const newSortOrder = sort_order !== undefined ? Number(sort_order) : category.sort_order;
+
+            if (name !== undefined) {
+                const duplicate = await db.get('SELECT id FROM categories WHERE name = ? COLLATE NOCASE AND id <> ?', [newName, id]);
+                if (duplicate) {
+                    throw { status: 409, message: 'Já existe outra categoria com esse nome.' };
+                }
+            }
+
+            await db.run(
+                'UPDATE categories SET name = ?, color = ?, sort_order = ? WHERE id = ?',
+                [newName, newColor, newSortOrder, id]
+            );
+            await logActionUnlocked(db, req, 'UPDATE', 'category', id, `Categoria ${newName} actualizada`);
+
+            const updatedCategory = await db.get('SELECT * FROM categories WHERE id = ?', id);
+            res.json(updatedCategory);
+        });
+    } catch (error) {
+        if (error.status) {
+            return res.status(error.status).json({ error: error.message });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Erro interno ao processar categoria.' });
+    }
+});
+
+app.delete('/api/categories/:id', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await withDb(async (db) => {
+            const category = await db.get('SELECT * FROM categories WHERE id = ?', id);
+            if (!category) {
+                throw { status: 404, message: 'Categoria não encontrada.' };
+            }
+
+            const countResult = await db.get('SELECT COUNT(*) AS n FROM products WHERE category_id = ?', id);
+            const n = countResult.n;
+
+            if (n > 0) {
+                throw { status: 409, message: `A categoria tem ${n} produto(s) associado(s). Reatribua-os antes de eliminar.` };
+            }
+
+            await db.run('DELETE FROM categories WHERE id = ?', id);
+            await logActionUnlocked(db, req, 'DELETE', 'category', id, `Eliminada categoria: ${category.name}`);
+
+            res.status(204).send();
+        });
+    } catch (error) {
+        if (error.status) {
+            return res.status(error.status).json({ error: error.message });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Erro interno ao processar categoria.' });
+    }
 });
 
 // --- Relatórios (Admin e Financeiro) ---
