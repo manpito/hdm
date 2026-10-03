@@ -106,7 +106,7 @@ const POS = () => {
   const [cardId, setCardId] = useState('');
   const [status, setStatus] = useState({ msg: '', type: '' });
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [keypadValue, setKeypadValue] = useState('1');
+  const [keypadValue, setKeypadValue] = useState('0');
   const [settings, setSettings] = useState({});
   const [receipt, setReceipt] = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -348,7 +348,7 @@ const POS = () => {
             <button
               key={p.id}
               disabled={p.stock_quantity <= 0}
-              onClick={() => { setSelectedProduct(p); setKeypadValue('1'); }}
+              onClick={() => { setSelectedProduct(p); setKeypadValue('0'); }}
               className={`bg-white rounded-2xl shadow-sm border-2 overflow-hidden transition text-left flex flex-col ${p.stock_quantity <= 0 ? 'opacity-50 grayscale border-gray-200 cursor-not-allowed' : 'hover:border-blue-500 border-transparent cursor-pointer'}`}
             >
               {p.image_base64 ? <img src={p.image_base64} className="h-32 w-full object-cover" /> : <div className="h-32 bg-gray-100 flex items-center justify-center text-gray-300 font-bold uppercase text-[10px] text-center px-4">Sem Imagem</div>}
@@ -444,14 +444,14 @@ const POS = () => {
                   {[1,2,3,4,5,6,7,8,9,0].map(n => (
                     <button
                       key={n}
-                      onClick={() => setKeypadValue(v => (v === '1' && n !== 0) ? n.toString() : (v === '0' ? n.toString() : v + n.toString()))}
+                      onClick={() => setKeypadValue(v => (v === '0' ? n.toString() : v + n.toString()))}
                       className="h-16 bg-white rounded-2xl font-black text-2xl shadow-sm border border-gray-100 hover:bg-blue-50 active:scale-90 transition text-blue-900"
                     >
                       {n}
                     </button>
                   ))}
                   <button
-                    onClick={() => setKeypadValue(v => v.length > 1 ? v.slice(0, -1) : '1')}
+                    onClick={() => setKeypadValue(v => v.length > 1 ? v.slice(0, -1) : '0')}
                     className="h-16 bg-red-50 rounded-2xl font-black text-2xl shadow-sm border border-red-100 hover:bg-red-100 active:scale-90 transition text-red-600 flex items-center justify-center col-span-2"
                   >
                     ⌫
@@ -461,8 +461,8 @@ const POS = () => {
 
             <div className="p-6 bg-white border-t space-y-3">
                <button
-                  disabled={parseInt(keypadValue) === 0 || parseInt(keypadValue) > selectedProduct.stock_quantity}
-                  onClick={() => addToCart(selectedProduct, keypadValue)}
+                  disabled={(parseInt(keypadValue) || 1) > selectedProduct.stock_quantity}
+                  onClick={() => addToCart(selectedProduct, parseInt(keypadValue) || 1)}
                   className="w-full bg-green-600 text-white py-5 rounded-2xl font-black text-xl hover:bg-green-700 active:scale-95 disabled:bg-gray-200 disabled:text-gray-400 transition transform"
                >
                   ✓ ADICIONAR
