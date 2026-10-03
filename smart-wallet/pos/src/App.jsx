@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { ShoppingCart, LogOut, CreditCard, Printer, ChevronUp, ChevronDown, X, Check } from 'lucide-react';
 import { API_URL } from './config';
@@ -75,7 +75,7 @@ const VirtualKeyboard = ({ onKeyPress, onBackspace, onEnter, onClose }) => {
         <button
           type="button"
           onClick={onClose}
-          className="absolute -top-3 -right-3 w-8 h-8 bg-slate-800 text-amber-400 border border-slate-600 rounded-full font-black text-xs shadow hover:bg-slate-700 flex items-center justify-center winrest-bevel cursor-pointer"
+          className="absolute -top-3 -right-3 w-8 h-8 bg-slate-800 text-amber-400 border border-slate-600 rounded-full font-black text-xs shadow hover:bg-slate-700 flex items-center justify-center sw-bevel cursor-pointer"
         >
           ✕
         </button>
@@ -88,7 +88,7 @@ const VirtualKeyboard = ({ onKeyPress, onBackspace, onEnter, onClose }) => {
               const isEnter = key === 'Enter';
               const isSpace = key === ' ';
 
-              let btnClass = "min-h-[2.75rem] md:min-h-[3.25rem] py-2 px-1 md:px-2 rounded-lg font-bold shadow transition select-none flex items-center justify-center winrest-bevel active:scale-95 text-sm md:text-base cursor-pointer ";
+              let btnClass = "min-h-[2.75rem] md:min-h-[3.25rem] py-2 px-1 md:px-2 rounded-lg font-bold shadow transition select-none flex items-center justify-center sw-bevel active:scale-95 text-sm md:text-base cursor-pointer ";
 
               if (isEnter) {
                 btnClass += "bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white min-w-[4.5rem] md:min-w-[5.5rem] font-black";
@@ -315,6 +315,7 @@ const POS = () => {
         balance: res.data.remaining_balance,
         card_id: cardId
       });
+      setIsMobileCartOpen(true);
 
       setStatus({ msg: 'Venda realizada!', type: 'ok' });
     } catch (err) {
@@ -335,6 +336,7 @@ const POS = () => {
     setCart([]);
     setCardId('');
     setStatus({ msg: '', type: '' });
+    setIsMobileCartOpen(false);
     fetchProducts();
     // Preserves selectedCategoryId as requested: "A categoria seleccionada mantém-se depois de Nova Venda"
   };
@@ -376,10 +378,10 @@ const POS = () => {
         <div className="w-full max-w-xl flex flex-col items-center gap-3 md:gap-4 my-auto">
           
           {/* Compact Form */}
-          <form onSubmit={handleLogin} className="w-full bg-[#242d3b] border-2 border-slate-700 rounded-xl p-4 md:p-6 shadow-2xl winrest-bevel">
+          <form onSubmit={handleLogin} className="w-full bg-[#242d3b] border-2 border-slate-700 rounded-xl p-4 md:p-6 shadow-2xl sw-bevel">
             <div className="flex items-center justify-between mb-3 border-b border-slate-700/80 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-lg bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm shadow winrest-bevel">
+                <div className="w-9 h-9 rounded-lg bg-amber-500 text-slate-950 font-black flex items-center justify-center text-sm shadow sw-bevel">
                   SW
                 </div>
                 <div>
@@ -426,7 +428,7 @@ const POS = () => {
 
             <button
               type="submit"
-              className="w-full min-h-[3.5rem] bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white font-black text-base uppercase tracking-wider rounded-lg shadow-lg winrest-bevel active:scale-[0.98] transition flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full min-h-[3.5rem] bg-gradient-to-r from-blue-700 via-blue-600 to-indigo-700 hover:from-blue-600 hover:to-indigo-600 text-white font-black text-base uppercase tracking-wider rounded-lg shadow-lg sw-bevel active:scale-[0.98] transition flex items-center justify-center gap-2 cursor-pointer"
             >
               ENTRAR NO TERMINAL
             </button>
@@ -469,7 +471,7 @@ const POS = () => {
         {/* Top Header */}
         <header className="min-h-[3.5rem] h-14 px-4 bg-gradient-to-r from-[#171c26] via-[#242c3b] to-[#171c26] border-b-2 border-slate-900 flex items-center justify-between shrink-0 shadow-md">
           <div className="flex items-center gap-3">
-            <div className="px-2.5 py-1 bg-amber-500 text-slate-950 font-black text-xs md:text-sm rounded shadow winrest-bevel">
+            <div className="px-2.5 py-1 bg-amber-500 text-slate-950 font-black text-xs md:text-sm rounded shadow sw-bevel">
               POS 01
             </div>
             <div>
@@ -485,7 +487,7 @@ const POS = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={logout}
-              className="min-h-[2.5rem] px-3 md:px-4 py-1.5 bg-red-700 hover:bg-red-800 text-white font-black text-xs uppercase rounded winrest-bevel flex items-center gap-1.5 cursor-pointer"
+              className="min-h-[2.5rem] px-3 md:px-4 py-1.5 bg-red-700 hover:bg-red-800 text-white font-black text-xs uppercase rounded sw-bevel flex items-center gap-1.5 cursor-pointer"
               title="Terminar Sessão"
             >
               <LogOut size={16} />
@@ -500,7 +502,7 @@ const POS = () => {
           {/* 1. Botão "Todos" */}
           <button
             onClick={() => setSelectedCategoryId('all')}
-            className={`min-h-[3.5rem] h-14 px-5 rounded-lg font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2 shrink-0 winrest-bevel transition cursor-pointer ${selectedCategoryId === 'all' ? 'bg-amber-400 text-slate-950 ring-4 ring-amber-300/60 border-2 border-white winrest-bevel-active-amber' : 'bg-[#333e4f] text-slate-200 border border-slate-600 hover:bg-[#3d4a60]'}`}
+            className={`min-h-[3.5rem] h-14 px-5 rounded-lg font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2 shrink-0 sw-bevel transition cursor-pointer ${selectedCategoryId === 'all' ? 'bg-amber-400 text-slate-950 ring-4 ring-amber-300/60 border-2 border-white sw-bevel-active-amber' : 'bg-[#333e4f] text-slate-200 border border-slate-600 hover:bg-[#3d4a60]'}`}
           >
             ★ TODOS ({products.length})
           </button>
@@ -517,7 +519,7 @@ const POS = () => {
                   backgroundColor: cat.color || '#3b82f6',
                   color: textColor
                 }}
-                className={`min-h-[3.5rem] h-14 px-5 rounded-lg font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2 shrink-0 winrest-bevel transition cursor-pointer ${isSelected ? 'ring-4 ring-white/90 border-2 border-slate-950 scale-[1.02] winrest-bevel-active' : 'opacity-90 hover:opacity-100 border border-black/30'}`}
+                className={`min-h-[3.5rem] h-14 px-5 rounded-lg font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2 shrink-0 sw-bevel transition cursor-pointer ${isSelected ? 'ring-4 ring-white/90 border-2 border-slate-950 scale-[1.02] sw-bevel-active' : 'opacity-90 hover:opacity-100 border border-black/30'}`}
               >
                 {isSelected && <span className="text-xs">✓</span>}
                 {cat.name}
@@ -529,7 +531,7 @@ const POS = () => {
           {hasUncategorizedProducts && (
             <button
               onClick={() => setSelectedCategoryId('others')}
-              className={`min-h-[3.5rem] h-14 px-5 rounded-lg font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2 shrink-0 winrest-bevel transition cursor-pointer ${selectedCategoryId === 'others' ? 'bg-slate-100 text-slate-950 ring-4 ring-white/80 border-2 border-slate-900 winrest-bevel-active' : 'bg-[#4b5563] text-slate-200 border border-slate-600 hover:bg-[#5b6777]'}`}
+              className={`min-h-[3.5rem] h-14 px-5 rounded-lg font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2 shrink-0 sw-bevel transition cursor-pointer ${selectedCategoryId === 'others' ? 'bg-slate-100 text-slate-950 ring-4 ring-white/80 border-2 border-slate-900 sw-bevel-active' : 'bg-[#4b5563] text-slate-200 border border-slate-600 hover:bg-[#5b6777]'}`}
             >
               OUTROS
             </button>
@@ -543,7 +545,7 @@ const POS = () => {
               <p className="text-base font-bold uppercase mb-2">Nenhum produto nesta categoria</p>
               <button
                 onClick={() => setSelectedCategoryId('all')}
-                className="min-h-[3.5rem] px-6 bg-amber-500 text-slate-950 font-black text-xs uppercase rounded-lg winrest-bevel cursor-pointer"
+                className="min-h-[3.5rem] px-6 bg-amber-500 text-slate-950 font-black text-xs uppercase rounded-lg sw-bevel cursor-pointer"
               >
                 VER TODOS OS PRODUTOS
               </button>
@@ -560,7 +562,7 @@ const POS = () => {
                     key={p.id}
                     disabled={isOutOfStock}
                     onClick={() => { setSelectedProduct(p); setKeypadValue('0'); }}
-                    className={`bg-[#2e3747] hover:bg-[#394559] text-left flex flex-col justify-between rounded-lg p-2.5 border-2 border-slate-700/80 winrest-bevel transition min-h-[11rem] relative overflow-hidden select-none ${isOutOfStock ? 'opacity-40 grayscale cursor-not-allowed border-slate-800' : 'cursor-pointer active:scale-[0.98]'}`}
+                    className={`bg-[#2e3747] hover:bg-[#394559] text-left flex flex-col justify-between rounded-lg p-2.5 border-2 border-slate-700/80 sw-bevel transition min-h-[11rem] relative overflow-hidden select-none ${isOutOfStock ? 'opacity-40 grayscale cursor-not-allowed border-slate-800' : 'cursor-pointer active:scale-[0.98]'}`}
                   >
                     {/* Faixa indicadora da categoria */}
                     <div
@@ -620,7 +622,7 @@ const POS = () => {
         <div className="lg:hidden shrink-0 bg-[#171c26] border-t-2 border-slate-900 p-2.5 flex items-center justify-between gap-2 shadow-2xl">
           <button
             onClick={() => setIsMobileCartOpen(!isMobileCartOpen)}
-            className="flex items-center gap-2 px-3 py-2 bg-[#232b38] rounded-lg border border-slate-700 winrest-bevel flex-1 min-h-[3.5rem] cursor-pointer"
+            className="flex items-center gap-2 px-3 py-2 bg-[#232b38] rounded-lg border border-slate-700 sw-bevel flex-1 min-h-[3.5rem] cursor-pointer"
           >
             <ShoppingCart className="text-amber-400" size={20} />
             <div className="text-left flex-1 min-w-0">
@@ -644,7 +646,7 @@ const POS = () => {
                 checkout();
               }
             }}
-            className="min-h-[3.5rem] px-4 bg-gradient-to-r from-emerald-600 to-green-700 disabled:bg-slate-700 disabled:opacity-50 text-white font-black text-xs md:text-sm uppercase rounded-lg winrest-bevel flex items-center justify-center cursor-pointer"
+            className="min-h-[3.5rem] px-4 bg-gradient-to-r from-emerald-600 to-green-700 disabled:bg-slate-700 disabled:opacity-50 text-white font-black text-xs md:text-sm uppercase rounded-lg sw-bevel flex items-center justify-center cursor-pointer"
           >
             {processing ? 'A processar...' : 'PAGAR AGORA'}
           </button>
@@ -711,13 +713,13 @@ const POS = () => {
             <div className="p-4 bg-gray-100 border-t border-gray-300 space-y-2.5 no-print">
               <button
                 onClick={handleNewSale}
-                className="w-full min-h-[3.5rem] bg-green-700 text-white font-black text-lg uppercase rounded-lg shadow winrest-bevel active:scale-95 transition cursor-pointer"
+                className="w-full min-h-[3.5rem] bg-green-700 text-white font-black text-lg uppercase rounded-lg shadow sw-bevel active:scale-95 transition cursor-pointer"
               >
                 NOVA VENDA
               </button>
               <button
                 onClick={() => window.print()}
-                className="w-full min-h-[3.5rem] bg-blue-700 text-white font-black text-base uppercase rounded-lg shadow winrest-bevel active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full min-h-[3.5rem] bg-blue-700 text-white font-black text-base uppercase rounded-lg shadow sw-bevel active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Printer size={20} /> IMPRIMIR TALÃO
               </button>
@@ -739,7 +741,7 @@ const POS = () => {
               </div>
               <button
                 onClick={() => setSelectedProduct(null)}
-                className="min-h-[2.5rem] px-2.5 py-1 bg-slate-800 text-slate-300 hover:text-white rounded border border-slate-700 winrest-bevel text-xs font-bold cursor-pointer"
+                className="min-h-[2.5rem] px-2.5 py-1 bg-slate-800 text-slate-300 hover:text-white rounded border border-slate-700 sw-bevel text-xs font-bold cursor-pointer"
               >
                 ✕
               </button>
@@ -769,14 +771,14 @@ const POS = () => {
                   <button
                     key={n}
                     onClick={() => setKeypadValue(v => (v === '0' ? n.toString() : v + n.toString()))}
-                    className="min-h-[3.5rem] h-14 bg-[#2b3545] hover:bg-[#384559] active:scale-90 text-amber-300 font-black text-2xl rounded-lg winrest-bevel shadow flex items-center justify-center cursor-pointer"
+                    className="min-h-[3.5rem] h-14 bg-[#2b3545] hover:bg-[#384559] active:scale-90 text-amber-300 font-black text-2xl rounded-lg sw-bevel shadow flex items-center justify-center cursor-pointer"
                   >
                     {n}
                   </button>
                 ))}
                 <button
                   onClick={() => setKeypadValue(v => v.length > 1 ? v.slice(0, -1) : '0')}
-                  className="min-h-[3.5rem] h-14 bg-red-900/70 hover:bg-red-800 active:scale-90 text-red-200 font-black text-2xl rounded-lg winrest-bevel shadow flex items-center justify-center col-span-2 cursor-pointer"
+                  className="min-h-[3.5rem] h-14 bg-red-900/70 hover:bg-red-800 active:scale-90 text-red-200 font-black text-2xl rounded-lg sw-bevel shadow flex items-center justify-center col-span-2 cursor-pointer"
                 >
                   ⌫
                 </button>
@@ -788,13 +790,13 @@ const POS = () => {
               <button
                 disabled={(parseInt(keypadValue) || 1) > selectedProduct.stock_quantity}
                 onClick={() => addToCart(selectedProduct, parseInt(keypadValue) || 1)}
-                className="w-full min-h-[3.5rem] bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase rounded-lg winrest-bevel transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full min-h-[3.5rem] bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase rounded-lg sw-bevel transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Check size={22} /> ADICIONAR
               </button>
               <button
                 onClick={() => setSelectedProduct(null)}
-                className="w-full min-h-[3.5rem] bg-[#2a3443] hover:bg-[#384559] text-slate-300 font-black text-sm uppercase rounded-lg winrest-bevel transition active:scale-98 cursor-pointer"
+                className="w-full min-h-[3.5rem] bg-[#2a3443] hover:bg-[#384559] text-slate-300 font-black text-sm uppercase rounded-lg sw-bevel transition active:scale-98 cursor-pointer"
               >
                 CANCELAR
               </button>
@@ -816,14 +818,14 @@ const POS = () => {
                 {cart.length > 0 && (
                   <button
                     onClick={() => setCart([])}
-                    className="text-[11px] font-bold text-slate-400 hover:text-red-400 px-2 py-1 rounded bg-[#202737] border border-slate-700 winrest-bevel cursor-pointer"
+                    className="text-[11px] font-bold text-slate-400 hover:text-red-400 px-2 py-1 rounded bg-[#202737] border border-slate-700 sw-bevel cursor-pointer"
                   >
                     Limpar
                   </button>
                 )}
                 <button
                   onClick={() => setIsMobileCartOpen(false)}
-                  className="lg:hidden text-slate-400 hover:text-white p-1 rounded bg-slate-800 winrest-bevel cursor-pointer"
+                  className="lg:hidden text-slate-400 hover:text-white p-1 rounded bg-slate-800 sw-bevel cursor-pointer"
                   title="Recolher"
                 >
                   <X size={18} />
@@ -869,7 +871,7 @@ const POS = () => {
                     <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
                       <button
                         onClick={() => updateCartQty(item.id, -1)}
-                        className="min-h-[2.5rem] min-w-[2.5rem] bg-[#2d3748] hover:bg-[#3d4a60] text-slate-100 font-black rounded winrest-bevel flex items-center justify-center text-base cursor-pointer"
+                        className="min-h-[2.5rem] min-w-[2.5rem] bg-[#2d3748] hover:bg-[#3d4a60] text-slate-100 font-black rounded sw-bevel flex items-center justify-center text-base cursor-pointer"
                       >
                         −
                       </button>
@@ -878,7 +880,7 @@ const POS = () => {
                       </span>
                       <button
                         onClick={() => updateCartQty(item.id, 1)}
-                        className="min-h-[2.5rem] min-w-[2.5rem] bg-[#2d3748] hover:bg-[#3d4a60] text-slate-100 font-black rounded winrest-bevel flex items-center justify-center text-base cursor-pointer"
+                        className="min-h-[2.5rem] min-w-[2.5rem] bg-[#2d3748] hover:bg-[#3d4a60] text-slate-100 font-black rounded sw-bevel flex items-center justify-center text-base cursor-pointer"
                       >
                         +
                       </button>
@@ -917,7 +919,7 @@ const POS = () => {
               <button
                 disabled={cart.length === 0 || processing}
                 onClick={checkout}
-                className="w-full min-h-[3.5rem] h-14 md:h-16 bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase tracking-wider rounded-lg winrest-bevel shadow-lg active:scale-98 transition flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full min-h-[3.5rem] h-14 md:h-16 bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase tracking-wider rounded-lg sw-bevel shadow-lg active:scale-98 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 {processing ? 'A processar...' : 'PAGAR AGORA'}
               </button>
