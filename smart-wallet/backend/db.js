@@ -27,6 +27,7 @@ async function initDb() {
   };
 
   await addColumnIfNotExists('products', 'stock_minimum', 'INTEGER DEFAULT 5');
+  await addColumnIfNotExists('products', 'category_id', 'INTEGER');
   await addColumnIfNotExists('cards', 'owner_name', 'TEXT');
   await addColumnIfNotExists('cards', 'entity', 'TEXT');
   await addColumnIfNotExists('cards', 'is_active', 'INTEGER DEFAULT 1');
