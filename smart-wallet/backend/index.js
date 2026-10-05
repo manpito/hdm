@@ -15,15 +15,17 @@ const dbMutex = new Mutex();
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
+const DEFAULT_CORS_ORIGINS = [
+    'http://localhost:5174',
+    'http://localhost:5173'
+];
+const CORS_ORIGINS = process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
+    : DEFAULT_CORS_ORIGINS;
+console.log('CORS origins:', CORS_ORIGINS.join(', '));
+
 app.use(cors({
-    origin: [
-        'http://78.47.242.71:5174',
-        'http://78.47.242.71:5173',
-        'http://192.168.100.211:5174',
-        'http://192.168.100.211:5173',
-        'http://localhost:5174',
-        'http://localhost:5173'
-    ],
+    origin: CORS_ORIGINS,
     credentials: true
 }));
 app.use(express.json({ limit: '10mb' })); // Para suportar imagens Base64
