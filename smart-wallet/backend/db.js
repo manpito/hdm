@@ -14,6 +14,8 @@ async function initDb() {
     driver: sqlite3.Database
   });
 
+  await db.run('PRAGMA busy_timeout = 5000');
+
   // Apply schema
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await db.exec(schema);
