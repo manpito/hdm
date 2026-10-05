@@ -2,6 +2,10 @@
   "name": "smart-wallet-backend",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "backup:hourly": "node scripts/backup.js --type=hourly",
+    "backup:daily": "node scripts/backup.js --type=daily"
+  },
   "dependencies": {
     "async-mutex": "^0.5.0",
     "bcryptjs": "^2.4.3",
