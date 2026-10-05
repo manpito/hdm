@@ -14,6 +14,25 @@ const dbMutex = new Mutex();
 
 const app = express();
 app.set('trust proxy', 1);
+
+// --- Erros em handlers assíncronos ---
+// Encaminha para o middleware de erro global qualquer excepção ou Promise rejeitada
+// num handler de rota, para que um erro numa query não derrube o processo Node.
+const wrapAsync = (fn) => {
+    if (typeof fn !== 'function' || fn.length === 4) return fn;
+    return (req, res, next) => {
+        try {
+            const result = fn(req, res, next);
+            if (result && typeof result.then === 'function') result.catch(next);
+        } catch (err) {
+            next(err);
+        }
+    };
+};
+for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
+    const original = app[method].bind(app);
+    app[method] = (path, ...handlers) => original(path, ...handlers.map(wrapAsync));
+}
 app.use(helmet());
 const DEFAULT_CORS_ORIGINS = [
     'http://localhost:5174',
@@ -915,6 +934,20 @@ app.put('/api/settings', authenticateToken, authorizeRoles(['admin']), async (re
   }
   await logAction(req, 'UPDATE', 'settings', 'global', 'Definições do sistema atualizadas');
   res.json({ message: 'Settings updated' });
+});
+
+// --- Middleware de erro global (tem de ficar depois de todas as rotas) ---
+app.use((err, req, res, next) => {
+    if (err && err.type === 'entity.parse.failed') {
+        return res.status(400).json({ error: 'Pedido inválido (JSON mal formado).' });
+    }
+    console.error(`[ERRO] ${req.method} ${req.originalUrl}:`, err);
+    if (res.headersSent) return next(err);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[ERRO] Promise rejeitada sem tratamento:', reason);
 });
 
 const PORT = process.env.PORT || 3001;
