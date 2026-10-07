@@ -499,7 +499,7 @@ const CategoriesManagement = () => {
 const StockManagement = () => {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null });
+  const [form, setForm] = useState({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null, is_open_price: 0 });
   const [editingId, setEditingId] = useState(null);
   const [stockAdjust, setStockAdjust] = useState('');
 
@@ -525,15 +525,16 @@ const StockManagement = () => {
     const config = { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } };
     const payload = {
         ...form,
-        price: Number(form.price),
-        stock_quantity: Number(form.stock_quantity),
-        stock_minimum: Number(form.stock_minimum),
-        category_id: form.category_id ? Number(form.category_id) : null
+        price: form.is_open_price ? 0 : Number(form.price),
+        stock_quantity: form.is_open_price ? 0 : Number(form.stock_quantity),
+        stock_minimum: form.is_open_price ? 0 : Number(form.stock_minimum),
+        category_id: form.category_id ? Number(form.category_id) : null,
+        is_open_price: form.is_open_price ? 1 : 0
     };
     if (editingId) await axios.put(`${API_URL}/products/${editingId}`, payload, config);
     else await axios.post(`${API_URL}/products`, payload, config);
     setEditingId(null);
-    setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null });
+    setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null, is_open_price: 0 });
     setStockAdjust('');
     fetchStock();
   };
@@ -572,27 +573,35 @@ const StockManagement = () => {
       <form onSubmit={saveProduct} className="bg-white p-6 rounded shadow-sm border grid grid-cols-4 gap-4">
         <h3 className="col-span-4 font-bold border-b pb-2">{editingId ? 'Editar Produto' : 'Novo Produto'}</h3>
         <input placeholder="Nome" className="p-2 border rounded col-span-2" value={form.name} onChange={e => setForm({...form, name: e.target.value})} required />
-        <input placeholder="Preço (un.)" type="number" step="0.01" className="p-2 border rounded" value={form.price} onChange={e => setForm({...form, price: e.target.value})} required />
+        {!form.is_open_price && (
+          <input placeholder="Preço (un.)" type="number" step="0.01" className="p-2 border rounded" value={form.price} onChange={e => setForm({...form, price: e.target.value})} required />
+        )}
 
         <select className="p-2 border rounded" value={form.category_id || ''} onChange={e => setForm({...form, category_id: e.target.value || null})}>
           <option value="">Sem categoria</option>
           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
 
-        {!editingId && (
+        {!editingId && !form.is_open_price && (
           <input placeholder="Stock Inicial" type="number" className="p-2 border rounded" value={form.stock_quantity} onChange={e => setForm({...form, stock_quantity: e.target.value})} required />
         )}
-        {editingId && (
+        {editingId && !form.is_open_price && (
           <div className="flex gap-2 items-center">
             <input placeholder="Ajustar Stock" type="number" min="1" className="p-2 border rounded w-full" value={stockAdjust} onChange={e => setStockAdjust(e.target.value)} />
             <button type="button" onClick={() => adjustStock(true)} className="bg-green-600 text-white font-bold p-2 rounded hover:bg-green-700 whitespace-nowrap">+ Entrada</button>
             <button type="button" onClick={() => adjustStock(false)} className="bg-red-600 text-white font-bold p-2 rounded hover:bg-red-700 whitespace-nowrap">− Saída</button>
           </div>
         )}
-        <div className="col-span-2 flex flex-col gap-1">
-          <label className="text-xs text-gray-500 font-bold uppercase">Stock Mínimo (Alerta)</label>
-          <input placeholder="Stock Mínimo" type="number" className="p-2 border rounded w-full" value={form.stock_minimum} onChange={e => setForm({...form, stock_minimum: e.target.value})} required />
-        </div>
+        {!form.is_open_price && (
+          <div className="col-span-2 flex flex-col gap-1">
+            <label className="text-xs text-gray-500 font-bold uppercase">Stock Mínimo (Alerta)</label>
+            <input placeholder="Stock Mínimo" type="number" className="p-2 border rounded w-full" value={form.stock_minimum} onChange={e => setForm({...form, stock_minimum: e.target.value})} required />
+          </div>
+        )}
+        <label className="col-span-4 flex items-center gap-2 text-sm font-bold text-gray-700">
+          <input type="checkbox" checked={!!form.is_open_price} onChange={e => setForm({...form, is_open_price: e.target.checked ? 1 : 0})} />
+          Produto de preço livre (o operador introduz o preço no POS; sem controlo de stock)
+        </label>
         <div className="col-span-2 flex flex-col gap-1">
           <label className="text-xs text-gray-500 font-bold uppercase">Imagem do Produto</label>
           <input type="file" accept="image/*" onChange={handleImage} className="text-sm" />
@@ -606,7 +615,7 @@ const StockManagement = () => {
         <button className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-bold col-span-4 transition shadow-md">
           {editingId ? 'Atualizar Produto' : 'Criar Produto'}
         </button>
-        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null }); setStockAdjust('');}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
+        {editingId && <button type="button" onClick={() => {setEditingId(null); setForm({ name: '', price: '', stock_quantity: 0, stock_minimum: 5, image_base64: '', category_id: null, is_open_price: 0 }); setStockAdjust('');}} className="col-span-4 text-gray-500 text-sm hover:underline">Cancelar Edição</button>}
       </form>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -616,18 +625,24 @@ const StockManagement = () => {
           <div key={p.id} className="bg-white p-4 border rounded-xl shadow-sm flex gap-4 items-center hover:shadow-md transition">
             <div className="relative">
               {p.image_base64 ? <img src={p.image_base64} className="w-20 h-20 object-cover rounded-lg border" /> : <div className="w-20 h-20 bg-gray-100 rounded-lg flex items-center justify-center text-gray-300 text-[10px] text-center px-1 font-bold">SEM IMAGEM</div>}
-              {p.stock_quantity < p.stock_minimum && <div className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"><AlertTriangle size={12}/></div>}
+              {!p.is_open_price && p.stock_quantity < p.stock_minimum && <div className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"><AlertTriangle size={12}/></div>}
             </div>
             <div className="flex-1">
               <h4 className="font-bold text-gray-800 leading-tight">{p.name}</h4>
               <p className="text-xs font-bold text-gray-500 uppercase">{cat ? cat.name : '—'}</p>
-              <p className="text-blue-600 font-black">{Number(p.price).toFixed(2)} <span className="text-[10px] uppercase">un.</span></p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.stock_quantity < p.stock_minimum ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                  Stock: {p.stock_quantity}
-                </span>
-                <span className="text-[10px] text-gray-400 font-medium">Mín: {p.stock_minimum}</span>
-              </div>
+              {p.is_open_price ? (
+                <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">PREÇO LIVRE · sem stock</span>
+              ) : (
+                <>
+                  <p className="text-blue-600 font-black">{Number(p.price).toFixed(2)} <span className="text-[10px] uppercase">un.</span></p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.stock_quantity < p.stock_minimum ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                      Stock: {p.stock_quantity}
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-medium">Mín: {p.stock_minimum}</span>
+                  </div>
+                </>
+              )}
             </div>
             <button onClick={() => {setEditingId(p.id); setForm(p)}} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition"><Edit size={18}/></button>
           </div>
@@ -676,7 +691,7 @@ const Reports = () => {
         setCardData(res.data.card);
         res.data = res.data.sales;
       }
-      else if (tab === 'stock') res = await axios.get(`${API_URL}/products`, config);
+      else if (tab === 'stock') { res = await axios.get(`${API_URL}/products`, config); res = { ...res, data: res.data.filter(p => !p.is_open_price) }; }
       else if (tab === 'carregamentos') res = await axios.get(`${API_URL}/reports/recharges`, config);
       setData(res.data || []);
     } catch (e) { alert('Erro ao carregar dados'); }
@@ -906,10 +921,38 @@ const SettingsPage = () => {
     alert('Definições atualizadas!');
   };
 
+  const toggleOpenPrice = async () => {
+    const next = form.openPriceEnabled === '1' ? '0' : '1';
+    const msg = next === '1'
+      ? 'Activar o produto de preço livre nos terminais POS? Os operadores passam a poder introduzir o preço.'
+      : 'Desactivar o produto de preço livre nos terminais POS?';
+    if (!window.confirm(msg)) return;
+    try {
+      await axios.put(`${API_URL}/settings`, { openPriceEnabled: next }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+      setForm({ ...form, openPriceEnabled: next });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao alterar a definição');
+    }
+  };
+
   if (!config) return <div>Carregando...</div>;
 
   return (
-    <form onSubmit={handleSave} className="bg-white p-8 border rounded-xl shadow-sm max-w-2xl space-y-6">
+    <div className="space-y-6 max-w-2xl">
+    <div className={`p-6 border rounded-xl shadow-sm flex items-center justify-between gap-4 ${form.openPriceEnabled === '1' ? 'bg-amber-50 border-amber-300' : 'bg-white'}`}>
+      <div>
+        <h3 className="font-black">Produto de preço livre nos POS</h3>
+        <p className="text-sm text-gray-500">
+          {form.openPriceEnabled === '1'
+            ? 'ACTIVO — os operadores POS podem vender produtos de preço livre.'
+            : 'DESACTIVADO — só o administrador pode vender produtos de preço livre.'}
+        </p>
+      </div>
+      <button type="button" onClick={toggleOpenPrice} className={`px-6 py-3 rounded-lg font-bold text-white shadow-md transition ${form.openPriceEnabled === '1' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}>
+        {form.openPriceEnabled === '1' ? 'Desactivar' : 'Activar'}
+      </button>
+    </div>
+    <form onSubmit={handleSave} className="bg-white p-8 border rounded-xl shadow-sm space-y-6">
       <h3 className="text-xl font-black border-b pb-4">Definições do Sistema</h3>
 
       <div className="grid grid-cols-2 gap-6">
@@ -933,6 +976,7 @@ const SettingsPage = () => {
 
       <button className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow-md">Guardar Alterações</button>
     </form>
+    </div>
   );
 };
 

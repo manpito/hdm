@@ -30,6 +30,7 @@ async function initDb() {
 
   await addColumnIfNotExists('products', 'stock_minimum', 'INTEGER DEFAULT 5');
   await addColumnIfNotExists('products', 'category_id', 'INTEGER');
+  await addColumnIfNotExists('products', 'is_open_price', 'INTEGER DEFAULT 0');
   await addColumnIfNotExists('cards', 'owner_name', 'TEXT');
   await addColumnIfNotExists('cards', 'entity', 'TEXT');
   await addColumnIfNotExists('cards', 'is_active', 'INTEGER DEFAULT 1');
@@ -41,7 +42,8 @@ async function initDb() {
   const settings = [
     { key: 'installationName', value: 'SmartWallet Central' },
     { key: 'stockThreshold', value: '10' },
-    { key: 'nfcCardPrice', value: '500' }
+    { key: 'nfcCardPrice', value: '500' },
+    { key: 'openPriceEnabled', value: '0' }
   ];
 
   for (const s of settings) {
