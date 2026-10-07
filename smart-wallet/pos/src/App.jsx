@@ -155,6 +155,8 @@ const POS = () => {
   const [status, setStatus] = useState({ msg: '', type: '' });
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [keypadValue, setKeypadValue] = useState('0');
+  const [openPriceValue, setOpenPriceValue] = useState('');
+  const [openPriceConfirmed, setOpenPriceConfirmed] = useState(null);
   const [settings, setSettings] = useState({});
   const [receipt, setReceipt] = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -256,36 +258,71 @@ const POS = () => {
     return () => axios.interceptors.response.eject(interceptor);
   }, [logout]);
 
-  const addToCart = (p, qty) => {
+  const OPEN_PRICE_MAX = 999999;
+
+  const selectProduct = (p) => {
+    setSelectedProduct(p);
+    setKeypadValue('0');
+    setOpenPriceValue('');
+    setOpenPriceConfirmed(null);
+  };
+
+  const parsedOpenPrice = () => {
+    const v = Number(openPriceValue);
+    return (openPriceValue !== '' && Number.isFinite(v) && v > 0 && v <= OPEN_PRICE_MAX) ? Math.round(v * 100) / 100 : null;
+  };
+
+  const pressOpenPriceKey = (k) => {
+    setOpenPriceValue(v => {
+      if (k === '.') {
+        if (v.includes('.')) return v;
+        return v === '' ? '0.' : v + '.';
+      }
+      const [intPart, decPart] = v.split('.');
+      if (decPart !== undefined) {
+        return decPart.length >= 2 ? v : v + k;
+      }
+      if (intPart.length >= 6) return v;
+      return (v === '0' ? '' : v) + k;
+    });
+  };
+
+  const addToCart = (p, qty, unitPrice = null) => {
     const qtyToAdd = parseInt(qty);
     if (isNaN(qtyToAdd) || qtyToAdd <= 0) return;
 
-    const existing = cart.find(item => item.id === p.id);
+    const isOpen = !!p.is_open_price;
+    if (isOpen && (unitPrice === null || !(unitPrice > 0))) return;
+    const lineKey = isOpen ? `${p.id}@${unitPrice}` : String(p.id);
+
+    const existing = cart.find(item => item.lineKey === lineKey);
     const currentQtyInCart = existing ? existing.quantity : 0;
     const totalNewQty = currentQtyInCart + qtyToAdd;
 
-    if (totalNewQty > p.stock_quantity) {
+    if (!isOpen && totalNewQty > p.stock_quantity) {
       setStatus({ msg: `Stock insuficiente para ${p.name}`, type: 'err' });
       return;
     }
 
     if (existing) {
-      setCart(cart.map(i => i.id === p.id ? { ...i, quantity: totalNewQty } : i));
+      setCart(cart.map(i => i.lineKey === lineKey ? { ...i, quantity: totalNewQty } : i));
     } else {
-      setCart([...cart, { ...p, quantity: qtyToAdd }]);
+      setCart([...cart, { ...p, price: isOpen ? unitPrice : p.price, lineKey, quantity: qtyToAdd }]);
     }
 
     setStatus({ msg: '', type: '' });
     setSelectedProduct(null);
   };
 
-  const updateCartQty = (productId, delta) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) return;
+  const updateCartQty = (lineKey, delta) => {
+    const line = cart.find(i => i.lineKey === lineKey);
+    if (!line) return;
+    const product = products.find(p => p.id === line.id);
+    if (!product && !line.is_open_price) return;
     setCart(cart.map(item => {
-      if (item.id === productId) {
+      if (item.lineKey === lineKey) {
         const newQty = item.quantity + delta;
-        if (newQty > 0 && newQty <= product.stock_quantity) {
+        if (newQty > 0 && (item.is_open_price || newQty <= product.stock_quantity)) {
           return { ...item, quantity: newQty };
         }
       }
@@ -300,7 +337,9 @@ const POS = () => {
     try {
       const res = await axios.post(`${API_URL}/sales`, {
         card_id: cardId,
-        items: cart.map(i => ({ product_id: i.id, quantity: i.quantity }))
+        items: cart.map(i => (i.is_open_price
+          ? { product_id: i.id, quantity: i.quantity, unit_price: i.price }
+          : { product_id: i.id, quantity: i.quantity }))
       }, { headers: { Authorization: `Bearer ${token}` } });
 
       const now = new Date();
@@ -555,13 +594,13 @@ const POS = () => {
               {filteredProducts.map(p => {
                 const cat = p.category_id ? categoryMap.get(p.category_id) : null;
                 const catColor = cat ? cat.color : '#64748b';
-                const isOutOfStock = p.stock_quantity <= 0;
+                const isOutOfStock = !p.is_open_price && p.stock_quantity <= 0;
 
                 return (
                   <button
                     key={p.id}
                     disabled={isOutOfStock}
-                    onClick={() => { setSelectedProduct(p); setKeypadValue('0'); }}
+                    onClick={() => selectProduct(p)}
                     className={`bg-[#2e3747] hover:bg-[#394559] text-left flex flex-col justify-between rounded-lg p-2.5 border-2 border-slate-700/80 sw-bevel transition min-h-[11rem] relative overflow-hidden select-none ${isOutOfStock ? 'opacity-40 grayscale cursor-not-allowed border-slate-800' : 'cursor-pointer active:scale-[0.98]'}`}
                   >
                     {/* Faixa indicadora da categoria */}
@@ -592,13 +631,13 @@ const POS = () => {
                         <div className="bg-black/80 px-2 py-1 rounded border border-slate-700 flex justify-between items-center">
                           <span className="text-[9px] font-bold text-slate-400">PREÇO</span>
                           <span className="font-mono text-emerald-400 font-black text-xs md:text-sm">
-                            {(p.price ?? 0).toFixed(2)} un.
+                            {p.is_open_price ? 'LIVRE' : `${(p.price ?? 0).toFixed(2)} un.`}
                           </span>
                         </div>
 
                         <div className="flex justify-between items-center text-[10px] font-bold">
                           <span className={isOutOfStock ? 'text-red-400' : 'text-slate-400'}>
-                            {isOutOfStock ? 'ESGOTADO' : `STK: ${p.stock_quantity}`}
+                            {p.is_open_price ? 'PREÇO LIVRE' : (isOutOfStock ? 'ESGOTADO' : `STK: ${p.stock_quantity}`)}
                           </span>
                           {cat && (
                             <span
@@ -725,6 +764,74 @@ const POS = () => {
               </button>
             </div>
           </div>
+        ) : (selectedProduct && selectedProduct.is_open_price && openPriceConfirmed === null) ? (
+
+          /* ECRÃ DE PREÇO (produto de preço livre) */
+          <div className="flex flex-col h-full bg-[#1e2532] animate-in fade-in duration-150">
+            <div className="p-4 bg-[#141b24] border-b-2 border-slate-900 flex justify-between items-center">
+              <div>
+                <h2 className="text-sm md:text-base font-black text-amber-400 uppercase leading-tight">
+                  {selectedProduct.name}
+                </h2>
+                <p className="text-xs text-slate-300 font-mono mt-0.5">PREÇO LIVRE • 1/2 INTRODUZIR PREÇO UNITÁRIO</p>
+              </div>
+              <button
+                onClick={() => setSelectedProduct(null)}
+                className="min-h-[2.5rem] px-2.5 py-1 bg-slate-800 text-slate-300 hover:text-white rounded border border-slate-700 sw-bevel text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 flex flex-col items-center justify-center flex-1 space-y-4">
+              <div className="w-full max-w-[280px]">
+                <div className="p-4 rounded-lg border-2 text-center bg-black border-amber-600 shadow-inner">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                    PREÇO UNITÁRIO (un.)
+                  </p>
+                  <span className="text-4xl md:text-5xl font-black font-mono text-amber-400 break-all">
+                    {openPriceValue === '' ? '0' : openPriceValue}
+                  </span>
+                  <p className="text-[10px] text-slate-500 font-bold mt-1">MÁX. {OPEN_PRICE_MAX.toLocaleString('pt-PT')} un.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 w-full max-w-[280px]">
+                {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0'].map(k => (
+                  <button
+                    key={k}
+                    onClick={() => pressOpenPriceKey(k)}
+                    className="min-h-[3.5rem] h-14 bg-[#2b3545] hover:bg-[#384559] active:scale-90 text-amber-300 font-black text-2xl rounded-lg sw-bevel shadow flex items-center justify-center cursor-pointer"
+                  >
+                    {k}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setOpenPriceValue(v => v.slice(0, -1))}
+                  className="min-h-[3.5rem] h-14 bg-red-900/70 hover:bg-red-800 active:scale-90 text-red-200 font-black text-2xl rounded-lg sw-bevel shadow flex items-center justify-center cursor-pointer"
+                >
+                  ⌫
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 bg-[#141b24] border-t-2 border-slate-900 space-y-2">
+              <button
+                disabled={parsedOpenPrice() === null}
+                onClick={() => { setOpenPriceConfirmed(parsedOpenPrice()); setKeypadValue('0'); }}
+                className="w-full min-h-[3.5rem] bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase rounded-lg sw-bevel transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Check size={22} /> CONFIRMAR PREÇO
+              </button>
+              <button
+                onClick={() => setSelectedProduct(null)}
+                className="w-full min-h-[3.5rem] bg-[#2a3443] hover:bg-[#384559] text-slate-300 font-black text-sm uppercase rounded-lg sw-bevel transition active:scale-98 cursor-pointer"
+              >
+                CANCELAR
+              </button>
+            </div>
+          </div>
+
         ) : selectedProduct ? (
           
           /* TECLADO DE QUANTIDADE (Variante 2: Classic Touch style) */
@@ -736,7 +843,9 @@ const POS = () => {
                   {selectedProduct.name}
                 </h2>
                 <p className="text-xs text-slate-300 font-mono mt-0.5">
-                  PREÇO: {(selectedProduct.price ?? 0).toFixed(2)} un. • STK: {selectedProduct.stock_quantity}
+                  {selectedProduct.is_open_price
+                    ? `PREÇO LIVRE: ${(openPriceConfirmed ?? 0).toFixed(2)} un. • 2/2 QUANTIDADE`
+                    : `PREÇO: ${(selectedProduct.price ?? 0).toFixed(2)} un. • STK: ${selectedProduct.stock_quantity}`}
                 </p>
               </div>
               <button
@@ -750,14 +859,14 @@ const POS = () => {
             {/* Display de Quantidade */}
             <div className="p-4 flex flex-col items-center justify-center flex-1 space-y-4">
               <div className="w-full max-w-[280px]">
-                <div className={`p-4 rounded-lg border-2 text-center bg-black ${parseInt(keypadValue) > selectedProduct.stock_quantity ? 'border-red-500' : 'border-amber-600 shadow-inner'}`}>
+                <div className={`p-4 rounded-lg border-2 text-center bg-black ${(!selectedProduct.is_open_price && parseInt(keypadValue) > selectedProduct.stock_quantity) ? 'border-red-500' : 'border-amber-600 shadow-inner'}`}>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                     QUANTIDADE A REGISTAR
                   </p>
-                  <span className={`text-5xl md:text-6xl font-black font-mono ${parseInt(keypadValue) > selectedProduct.stock_quantity ? 'text-red-500' : 'text-amber-400'}`}>
+                  <span className={`text-5xl md:text-6xl font-black font-mono ${(!selectedProduct.is_open_price && parseInt(keypadValue) > selectedProduct.stock_quantity) ? 'text-red-500' : 'text-amber-400'}`}>
                     {keypadValue}
                   </span>
-                  {parseInt(keypadValue) > selectedProduct.stock_quantity && (
+                  {(!selectedProduct.is_open_price && parseInt(keypadValue) > selectedProduct.stock_quantity) && (
                     <p className="text-xs text-red-400 font-bold mt-1 uppercase animate-pulse">
                       Excede Stock! (Max: {selectedProduct.stock_quantity})
                     </p>
@@ -788,8 +897,8 @@ const POS = () => {
             {/* Ações do Teclado */}
             <div className="p-4 bg-[#141b24] border-t-2 border-slate-900 space-y-2">
               <button
-                disabled={(parseInt(keypadValue) || 1) > selectedProduct.stock_quantity}
-                onClick={() => addToCart(selectedProduct, parseInt(keypadValue) || 1)}
+                disabled={!selectedProduct.is_open_price && (parseInt(keypadValue) || 1) > selectedProduct.stock_quantity}
+                onClick={() => addToCart(selectedProduct, parseInt(keypadValue) || 1, selectedProduct.is_open_price ? openPriceConfirmed : null)}
                 className="w-full min-h-[3.5rem] bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase rounded-lg sw-bevel transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Check size={22} /> ADICIONAR
@@ -842,7 +951,7 @@ const POS = () => {
               ) : (
                 cart.map(item => (
                   <div
-                    key={item.id}
+                    key={item.lineKey}
                     className="p-2.5 bg-black/80 rounded border border-slate-700 font-mono text-xs space-y-1.5 shadow"
                   >
                     <div className="flex justify-between items-start text-slate-100">
@@ -850,7 +959,7 @@ const POS = () => {
                         {item.name}
                       </span>
                       <button
-                        onClick={() => setCart(cart.filter(i => i.id !== item.id))}
+                        onClick={() => setCart(cart.filter(i => i.lineKey !== item.lineKey))}
                         className="text-red-400 hover:text-red-300 font-black px-1.5 py-0.5 rounded hover:bg-red-950/60 cursor-pointer"
                         title="Remover"
                       >
@@ -870,7 +979,7 @@ const POS = () => {
                     {/* Controles de Quantidade (Alvos de toque mínimos) */}
                     <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
                       <button
-                        onClick={() => updateCartQty(item.id, -1)}
+                        onClick={() => updateCartQty(item.lineKey, -1)}
                         className="min-h-[2.5rem] min-w-[2.5rem] bg-[#2d3748] hover:bg-[#3d4a60] text-slate-100 font-black rounded sw-bevel flex items-center justify-center text-base cursor-pointer"
                       >
                         −
@@ -879,7 +988,7 @@ const POS = () => {
                         {item.quantity}
                       </span>
                       <button
-                        onClick={() => updateCartQty(item.id, 1)}
+                        onClick={() => updateCartQty(item.lineKey, 1)}
                         className="min-h-[2.5rem] min-w-[2.5rem] bg-[#2d3748] hover:bg-[#3d4a60] text-slate-100 font-black rounded sw-bevel flex items-center justify-center text-base cursor-pointer"
                       >
                         +
