@@ -267,13 +267,27 @@ function validateCategory(body, partial = false) {
 }
 
 // --- Produtos (Gestão: Admin | Listagem: Todos) ---
+// --- Produto de preço livre ---
+const OPEN_PRICE_MAX = 999999;
+const isOpenPriceEnabled = async (conn) => {
+  const row = await conn.get("SELECT value FROM settings WHERE key = 'openPriceEnabled'");
+  return row?.value === '1';
+};
+
 app.get('/api/products', authenticateToken, async (req, res) => {
-  const products = await db.all('SELECT * FROM products');
+  let products = await db.all('SELECT * FROM products');
+  if (req.user.role !== 'admin' && !(await isOpenPriceEnabled(db))) {
+    products = products.filter(p => !p.is_open_price);
+  }
   res.json(products);
 });
 
 app.post('/api/products', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
-  const { name, price, stock_quantity, image_base64, stock_minimum, category_id } = req.body;
+  const { name, image_base64, category_id } = req.body;
+  const isOpenPrice = req.body.is_open_price ? 1 : 0;
+  const price = isOpenPrice ? 0 : req.body.price;
+  const stock_quantity = isOpenPrice ? 0 : req.body.stock_quantity;
+  const stock_minimum = isOpenPrice ? 0 : (req.body.stock_minimum || 5);
   let finalCategoryId = null;
 
   if (category_id !== undefined && category_id !== null && category_id !== '') {
@@ -293,13 +307,13 @@ app.post('/api/products', authenticateToken, authorizeRoles(['admin']), async (r
           }
 
           const resDb = await db.run(
-              'INSERT INTO products (name, price, stock_quantity, image_base64, stock_minimum, category_id) VALUES (?, ?, ?, ?, ?, ?)',
-              [name, price, stock_quantity, image_base64, stock_minimum || 5, finalCategoryId]
+              'INSERT INTO products (name, price, stock_quantity, image_base64, stock_minimum, category_id, is_open_price) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [name, price, stock_quantity, image_base64, stock_minimum, finalCategoryId, isOpenPrice]
           );
           await logActionUnlocked(db, req, 'CREATE', 'product', resDb.lastID, `Criado produto: ${name}`);
           return resDb;
       });
-      res.status(201).json({ id: result.lastID, name, price, stock_quantity, category_id: finalCategoryId });
+      res.status(201).json({ id: result.lastID, name, price, stock_quantity, category_id: finalCategoryId, is_open_price: isOpenPrice });
   } catch (error) {
       if (error.status) {
           return res.status(error.status).json({ error: error.message });
@@ -314,8 +328,17 @@ app.put('/api/products/:id', authenticateToken, authorizeRoles(['admin']), async
 
   try {
       await withDb(async (db) => {
-          let updateQuery = 'UPDATE products SET name = ?, price = ?, stock_minimum = ?, image_base64 = ?';
-          const queryParams = [name, price, stock_minimum, image_base64];
+          const current = await db.get('SELECT is_open_price FROM products WHERE id = ?', id);
+          if (!current) {
+              throw { status: 404, message: 'Produto não encontrado.' };
+          }
+          const isOpenPrice = 'is_open_price' in req.body ? (req.body.is_open_price ? 1 : 0) : (current.is_open_price ? 1 : 0);
+
+          let updateQuery = 'UPDATE products SET name = ?, price = ?, stock_minimum = ?, image_base64 = ?, is_open_price = ?';
+          const queryParams = [name, isOpenPrice ? 0 : price, isOpenPrice ? 0 : stock_minimum, image_base64, isOpenPrice];
+          if (isOpenPrice) {
+              updateQuery += ', stock_quantity = 0';
+          }
 
           if ('category_id' in req.body) {
               const { category_id } = req.body;
@@ -605,15 +628,35 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
 
     let totalCartPrice = 0;
     let lastSaleId = null;
+    const openPriceLines = [];
     for (const item of items) {
       const product = await db.get('SELECT * FROM products WHERE id = ?', item.product_id);
-      if (!product || product.stock_quantity < item.quantity) {
+      if (!product) {
         await db.run('ROLLBACK');
-        return res.status(400).json({ error: `Stock insuficiente para ${product?.name || 'produto'}` });
+        return res.status(400).json({ error: 'Produto não encontrado' });
       }
-      const itemPrice = product.price * item.quantity;
+      let itemPrice;
+      if (product.is_open_price) {
+        if (req.user.role !== 'admin' && !(await isOpenPriceEnabled(db))) {
+          await db.run('ROLLBACK');
+          return res.status(403).json({ error: 'Produto de preço livre desactivado pelo administrador.' });
+        }
+        const unitPrice = Number(item.unit_price);
+        if (!Number.isFinite(unitPrice) || unitPrice <= 0 || unitPrice > OPEN_PRICE_MAX || Math.abs(Math.round(unitPrice * 100) - unitPrice * 100) > 1e-6) {
+          await db.run('ROLLBACK');
+          return res.status(400).json({ error: `Preço inválido para ${product.name} (entre 0,01 e ${OPEN_PRICE_MAX} un., máximo 2 casas decimais).` });
+        }
+        itemPrice = Math.round(unitPrice * item.quantity * 100) / 100;
+        openPriceLines.push({ product, quantity: item.quantity, unitPrice, itemPrice });
+      } else {
+        if (product.stock_quantity < item.quantity) {
+          await db.run('ROLLBACK');
+          return res.status(400).json({ error: `Stock insuficiente para ${product.name}` });
+        }
+        itemPrice = product.price * item.quantity;
+        await db.run('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?', [item.quantity, item.product_id]);
+      }
       totalCartPrice += itemPrice;
-      await db.run('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?', [item.quantity, item.product_id]);
       const result = await db.run(
         'INSERT INTO sales (card_id, product_id, quantity, total_price, terminal_id) VALUES (?, ?, ?, ?, ?)',
         [card_id, item.product_id, item.quantity, itemPrice, terminal_id]
@@ -630,6 +673,9 @@ app.post('/api/sales', authenticateToken, authorizeRoles(['pos', 'admin']), asyn
     await db.run('UPDATE cards SET balance = ? WHERE id = ?', [newBalance, card_id]);
     await db.run('COMMIT');
     await logActionUnlocked(db, req, 'SALE', 'sale', card_id, `Venda realizada: ${totalCartPrice.toFixed(2)} un. no cartão ${card_id}`, totalCartPrice);
+    for (const line of openPriceLines) {
+      await logActionUnlocked(db, req, 'SALE_OPEN_PRICE', 'product', line.product.id, `Preço livre: ${line.product.name}, ${line.quantity} x ${line.unitPrice.toFixed(2)} un. no cartão ${card_id}`, line.itemPrice);
+    }
     res.status(201).json({
       message: 'Venda realizada com sucesso',
       id: lastSaleId,
@@ -769,7 +815,7 @@ app.delete('/api/categories/:id', authenticateToken, authorizeRoles(['admin']), 
 app.get('/api/reports/dashboard', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const salesToday = await db.get("SELECT SUM(total_price) as total FROM sales WHERE date(timestamp) = date('now')");
   // Dashboard low stock now checks product-specific threshold
-  const lowStock = await db.get("SELECT COUNT(*) as count FROM products WHERE stock_quantity < stock_minimum");
+  const lowStock = await db.get("SELECT COUNT(*) as count FROM products WHERE stock_quantity < stock_minimum AND COALESCE(is_open_price, 0) = 0");
   const activeTerminals = await db.get("SELECT COUNT(*) as count FROM terminals WHERE is_active = 1");
   const rechargeToday = await db.get("SELECT COUNT(*) as count FROM cards WHERE date(created_at) = date('now')"); // Emissões hoje (ou usar logs)
 
@@ -927,6 +973,17 @@ app.get('/api/settings', authenticateToken, authorizeRoles(['admin', 'financeiro
 
 app.put('/api/settings', authenticateToken, authorizeRoles(['admin']), async (req, res) => {
   const updates = req.body;
+  if ('openPriceEnabled' in updates) {
+    const v = String(updates.openPriceEnabled);
+    if (v !== '0' && v !== '1') {
+      return res.status(400).json({ error: 'openPriceEnabled deve ser 0 ou 1.' });
+    }
+    updates.openPriceEnabled = v;
+    const current = await isOpenPriceEnabled(db);
+    if (current !== (v === '1')) {
+      await logAction(req, v === '1' ? 'OPEN_PRICE_ENABLED' : 'OPEN_PRICE_DISABLED', 'settings', 'openPriceEnabled', v === '1' ? 'Produto de preço livre activado nos POS' : 'Produto de preço livre desactivado nos POS');
+    }
+  }
   for (const [key, value] of Object.entries(updates)) {
     if (key !== 'maxPosTerminals') { // Protegido via ENV
       await withDb(db => db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]));
