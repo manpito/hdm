@@ -224,6 +224,9 @@ const Dashboard = () => {
             <div>
                <h3 className="font-black text-lg uppercase tracking-tighter">Reconciliação Financeira</h3>
                <p className="text-sm opacity-70">{recon.isBalanced ? 'O sistema está equilibrado.' : `Discrepância detectada no balanço de unidades.`}</p>
+               <p className="text-xs opacity-60 mt-1 font-mono">
+                 Carregado {(recon.totalRecharged ?? 0).toFixed(2)} = Vendido {(recon.totalSold ?? 0).toFixed(2)} + Saldos {(recon.currentBalances ?? 0).toFixed(2)} + Perdido em cancelamentos {(recon.totalForfeited ?? 0).toFixed(2)}
+               </p>
             </div>
          </div>
          <div className="text-right">
@@ -1118,7 +1121,11 @@ const CardsManagement = () => {
 
   const handleCancel = async (id) => {
     if (!confirm('Tem a certeza que deseja cancelar este cartão? O saldo será perdido.')) return;
-    await axios.put(`${API_URL}/cards/${id}/cancel`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+    try {
+      await axios.put(`${API_URL}/cards/${id}/cancel`, {}, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao cancelar o cartão');
+    }
     fetchCards();
   };
 
@@ -1175,7 +1182,7 @@ const CardsManagement = () => {
 
       setRecharge({ id: '', amount: '' });
       fetchCards();
-    } catch (err) { alert('Erro no carregamento'); }
+    } catch (err) { alert(err.response?.data?.error || 'Erro no carregamento'); }
   };
 
   const exportCSV = () => {
@@ -1225,6 +1232,11 @@ const CardsManagement = () => {
 
         if (!uid || !owner_name || price_paid === undefined) {
           errors.push(`Linha ${line}: Campos obrigatórios em falta (uid, owner_name, price_paid).`);
+          return;
+        }
+
+        if (!/^[0-9]{4,20}$/.test(String(uid).trim())) {
+          errors.push(`Linha ${line}: UID inválido (${uid}) — só pode conter dígitos, entre 4 e 20.`);
           return;
         }
 
@@ -1357,7 +1369,7 @@ const CardsManagement = () => {
 
               <form onSubmit={handleRecharge} className="bg-white p-6 border rounded-xl shadow-sm h-fit space-y-4">
                  <h3 className="font-black uppercase text-gray-400 text-xs border-b pb-2">Carregamento Rápido</h3>
-                 <input placeholder="UID Cartão" className="w-full p-3 border rounded-lg bg-gray-50 font-mono" value={recharge.id} onChange={e => setRecharge({...recharge, id: e.target.value})} required />
+                 <input placeholder="UID Cartão" className="w-full p-3 border rounded-lg bg-gray-50 font-mono" value={recharge.id} onChange={e => setRecharge({...recharge, id: e.target.value.replace(/[^0-9]/g, '')})} inputMode="numeric" required />
                  <input placeholder="Valor (un.)" type="number" className="w-full p-3 border rounded-lg font-black text-xl text-blue-600" value={recharge.amount} onChange={e => setRecharge({...recharge, amount: e.target.value})} required />
                  <button className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">Confirmar Carregamento</button>
               </form>
@@ -1373,7 +1385,7 @@ const CardsManagement = () => {
            <div className="space-y-4">
               <div className="flex flex-col gap-1">
                  <label className="text-xs font-bold uppercase text-gray-400">UID do Cartão (NFC)</label>
-                 <input className="p-3 border rounded-lg font-mono" value={form.id} onChange={e => setForm({...form, id: e.target.value})} required />
+                 <input className="p-3 border rounded-lg font-mono" inputMode="numeric" pattern="[0-9]{4,20}" title="Só dígitos (entre 4 e 20)" placeholder="Apenas números" value={form.id} onChange={e => setForm({...form, id: e.target.value.replace(/[^0-9]/g, '')})} required />
               </div>
               <div className="flex flex-col gap-1">
                  <label className="text-xs font-bold uppercase text-gray-400">Nome do Titular</label>
