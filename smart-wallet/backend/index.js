@@ -448,8 +448,20 @@ app.get('/api/cards/:id', authenticateToken, authorizeRoles(['admin', 'financeir
   else res.status(404).json({ error: 'Cartão não encontrado' });
 });
 
+// --- Validação do UID do cartão: apenas dígitos (4 a 20) ---
+const CARD_UID_RE = /^\d{4,20}$/;
+const normalizeCardUid = (v) => String(v ?? '').trim();
+const CARD_UID_ERROR = 'UID do cartão inválido: só pode conter dígitos (entre 4 e 20).';
+
 app.post('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
-  const { id, owner_name, entity, price_paid } = req.body;
+  const { owner_name, entity, price_paid } = req.body;
+  const id = normalizeCardUid(req.body.id);
+  if (!CARD_UID_RE.test(id)) {
+    return res.status(400).json({ error: CARD_UID_ERROR });
+  }
+  if (typeof owner_name !== 'string' || owner_name.trim() === '') {
+    return res.status(400).json({ error: 'O nome do titular é obrigatório.' });
+  }
   try {
     await withDb(db => db.run(
       'INSERT INTO cards (id, owner_name, entity, price_paid, balance, is_active) VALUES (?, ?, ?, ?, 0, 1)',
@@ -464,12 +476,22 @@ app.post('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']
 
 app.put('/api/cards/:id/cancel', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { id } = req.params;
-  const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
-  if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
-
-  await withDb(db => db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', [id]));
-  await logAction(req, 'CANCEL_CARD', 'card', id, `Cartão de ${card.owner_name} cancelado`);
-  res.json({ message: 'Cartão cancelado' });
+  try {
+    const forfeited = await withDb(async (db) => {
+      const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
+      if (!card) throw { status: 404, message: 'Cartão não encontrado' };
+      if (card.is_active !== 1) throw { status: 400, message: 'O cartão já está cancelado.' };
+      const lost = Math.round((Number(card.balance) || 0) * 100) / 100;
+      await db.run('UPDATE cards SET is_active = 0, balance = 0 WHERE id = ?', [id]);
+      // O saldo perdido fica registado em amount, para a reconciliação o contabilizar
+      await logActionUnlocked(db, req, 'CANCEL_CARD', 'card', id, `Cartão de ${card.owner_name} cancelado; saldo perdido: ${lost.toFixed(2)} un.`, lost);
+      return lost;
+    });
+    res.json({ message: 'Cartão cancelado', forfeited_balance: forfeited });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
 });
 
 app.put('/api/cards/:id/edit', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
@@ -537,12 +559,18 @@ app.post('/api/cards/recharge', authenticateToken, authorizeRoles(['admin', 'fin
   try {
     const card = await db.get('SELECT * FROM cards WHERE id = ?', id);
     if (card) {
-      await db.run('UPDATE cards SET balance = balance + ?, is_active = 1 WHERE id = ?', [amount, id]);
+      if (card.is_active !== 1) {
+        return res.status(400).json({ error: 'Cartão cancelado: não pode ser carregado. Emita um novo cartão.' });
+      }
+      await db.run('UPDATE cards SET balance = balance + ? WHERE id = ?', [amount, id]);
       const updatedCard = await db.get('SELECT balance FROM cards WHERE id = ?', id);
       await logActionUnlocked(db, req, 'RECHARGE', 'card', id, `Carregamento de ${amount} un.`, amount);
       res.json({ id, balance: updatedCard.balance });
     } else {
       // Caso de uso: Carregamento de cartão não emitido previamente (legado ou simplificado)
+      if (!CARD_UID_RE.test(String(id ?? ''))) {
+        return res.status(400).json({ error: CARD_UID_ERROR });
+      }
       await db.run('INSERT INTO cards (id, balance, is_active) VALUES (?, ?, 1)', [id, amount]);
       await logActionUnlocked(db, req, 'CREATE_RECHARGE', 'card', id, `Novo cartão carregado com ${amount} un.`, amount);
       res.json({ id, balance: amount });
@@ -571,7 +599,13 @@ app.post('/api/cards/bulk-import', authenticateToken, authorizeRoles(['admin', '
     await db.run('BEGIN TRANSACTION');
     for (const card of cards) {
       try {
-        const { uid, owner_name, entity, balance, price_paid } = card;
+        const { owner_name, entity, balance, price_paid } = card;
+        const uid = normalizeCardUid(card.uid);
+        if (!CARD_UID_RE.test(uid)) {
+          results.failed++;
+          results.errors.push({ uid: card.uid, error: 'UID inválido (só dígitos, entre 4 e 20)' });
+          continue;
+        }
         await db.run(
           'INSERT INTO cards (id, owner_name, entity, price_paid, balance, is_active) VALUES (?, ?, ?, ?, ?, 1)',
           [uid, owner_name, entity, price_paid, balance]
@@ -906,16 +940,24 @@ app.get('/api/reports/reconciliation', authenticateToken, authorizeRoles(['admin
   const sales = await db.get('SELECT SUM(total_price) as total FROM sales');
   // Soma dos saldos atuais
   const balances = await db.get('SELECT SUM(balance) as total FROM cards WHERE is_active = 1');
+  // Saldos perdidos em cancelamentos (inclui regularizações históricas)
+  const forfeited = await db.get(`
+    SELECT SUM(amount) as total
+    FROM audit_logs
+    WHERE action IN ('CANCEL_CARD', 'FORFEIT_REGULARIZATION')
+  `);
 
   const totalRecharged = recharges.total || 0;
   const totalSold = sales.total || 0;
   const currentBalances = balances.total || 0;
-  const discrepancy = totalRecharged - (totalSold + currentBalances);
+  const totalForfeited = forfeited.total || 0;
+  const discrepancy = Math.round((totalRecharged - (totalSold + currentBalances + totalForfeited)) * 100) / 100;
 
   res.json({
     totalRecharged,
     totalSold,
     currentBalances,
+    totalForfeited,
     discrepancy,
     isBalanced: Math.abs(discrepancy) < 0.01
   });
