@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "backup:hourly": "node scripts/backup.js --type=hourly",
-    "backup:daily": "node scripts/backup.js --type=daily"
+    "backup:daily": "node scripts/backup.js --type=daily",
+    "backup:offsite": "node scripts/offsite.js",
+    "backup:decrypt": "node scripts/offsite-decrypt.js"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",
