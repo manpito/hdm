@@ -453,6 +453,16 @@ const CARD_UID_RE = /^\d{4,20}$/;
 const normalizeCardUid = (v) => String(v ?? '').trim();
 const CARD_UID_ERROR = 'UID do cartão inválido: só pode conter dígitos (entre 4 e 20).';
 
+// Consulta de saldo pelo POS: devolve apenas UID, saldo e estado (sem nome, entidade ou histórico)
+app.get('/api/pos/cards/:id/balance', authenticateToken, authorizeRoles(['pos', 'admin']), async (req, res) => {
+  const id = normalizeCardUid(req.params.id);
+  if (!CARD_UID_RE.test(id)) return res.status(400).json({ error: CARD_UID_ERROR });
+  const card = await db.get('SELECT id, balance, is_active FROM cards WHERE id = ?', id);
+  if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
+  if (card.is_active !== 1) return res.status(400).json({ error: 'Cartão cancelado' });
+  res.json({ id: card.id, balance: Math.round((Number(card.balance) || 0) * 100) / 100 });
+});
+
 app.post('/api/cards', authenticateToken, authorizeRoles(['admin', 'financeiro']), async (req, res) => {
   const { owner_name, entity, price_paid } = req.body;
   const id = normalizeCardUid(req.body.id);
