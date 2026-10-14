@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import axios from 'axios';
 import { ShoppingCart, LogOut, CreditCard, Printer, ChevronUp, ChevronDown, X, Check } from 'lucide-react';
 import { API_URL } from './config';
@@ -162,6 +162,11 @@ const POS = () => {
   const [processing, setProcessing] = useState(false);
   const [activeField, setActiveField] = useState('username');
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+  // Cartão lido no início da venda: saldo disponível (null = nenhum cartão lido)
+  const [cardBalance, setCardBalance] = useState(null);
+  const [cardLoading, setCardLoading] = useState(false);
+  const cardInputRef = useRef(null);
+  const autoResetRef = useRef(null);
 
   const logout = useCallback(() => {
     localStorage.removeItem('token');
@@ -260,7 +265,76 @@ const POS = () => {
 
   const OPEN_PRICE_MAX = 999999;
 
+  const toCents = (v) => Math.round((Number(v) || 0) * 100);
+
+  const focusCardInput = () => {
+    setTimeout(() => cardInputRef.current?.focus(), 0);
+  };
+
+  // ESC: limpa cartão, saldo e talão, e volta ao estado inicial à espera de cartão
+  const resetCard = useCallback(() => {
+    setCardId('');
+    setCardBalance(null);
+    setCart([]);
+    setSelectedProduct(null);
+    setStatus({ msg: '', type: '' });
+    focusCardInput();
+  }, []);
+
+  const lookupCard = async () => {
+    const uid = String(cardId ?? '').trim();
+    if (!uid || cardLoading) return;
+    if (!/^\d{4,20}$/.test(uid)) {
+      setCardBalance(null);
+      setStatus({ msg: 'UID do cartão inválido', type: 'err' });
+      return;
+    }
+    setCardLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/pos/cards/${encodeURIComponent(uid)}/balance`, { headers: { Authorization: `Bearer ${token}` } });
+      setCardId(res.data.id);
+      setCardBalance(Number(res.data.balance) || 0);
+      setStatus({ msg: '', type: '' });
+      // Em modo vertical, fecha o talão para o operador escolher os produtos
+      if (cart.length === 0) setIsMobileCartOpen(false);
+    } catch (err) {
+      setCardBalance(null);
+      setStatus({ msg: err.response?.data?.error || 'Erro ao ler o cartão', type: 'err' });
+    } finally {
+      setCardLoading(false);
+    }
+  };
+
+  const handleCardInputChange = (value) => {
+    // Ler outro cartão a meio do pedido limpa o talão
+    if (cardBalance !== null) {
+      setCardBalance(null);
+      setCart([]);
+      setSelectedProduct(null);
+    }
+    setStatus({ msg: '', type: '' });
+    setCardId(value);
+  };
+
+  const exceedsBalance = (extraAmount) => {
+    if (cardBalance === null) return true;
+    const currentTotal = cart.reduce((acc, item) => acc + ((item.price ?? 0) * item.quantity), 0);
+    return toCents(currentTotal) + toCents(extraAmount) > toCents(cardBalance);
+  };
+
   const selectProduct = (p) => {
+    if (cardBalance === null) {
+      setStatus({ msg: 'Passe o cartão primeiro', type: 'err' });
+      setIsMobileCartOpen(true);
+      focusCardInput();
+      return;
+    }
+    if (!p.is_open_price && exceedsBalance(p.price ?? 0)) {
+      setStatus({ msg: 'Saldo insuficiente', type: 'err' });
+      setIsMobileCartOpen(true);
+      return;
+    }
+    setStatus({ msg: '', type: '' });
     setSelectedProduct(p);
     setKeypadValue('0');
     setOpenPriceValue('');
@@ -304,6 +378,12 @@ const POS = () => {
       return;
     }
 
+    const linePrice = isOpen ? unitPrice : (p.price ?? 0);
+    if (exceedsBalance(linePrice * qtyToAdd)) {
+      setStatus({ msg: 'Saldo insuficiente', type: 'err' });
+      return;
+    }
+
     if (existing) {
       setCart(cart.map(i => i.lineKey === lineKey ? { ...i, quantity: totalNewQty } : i));
     } else {
@@ -319,6 +399,11 @@ const POS = () => {
     if (!line) return;
     const product = products.find(p => p.id === line.id);
     if (!product && !line.is_open_price) return;
+    if (delta > 0 && exceedsBalance((line.price ?? 0) * delta)) {
+      setStatus({ msg: 'Saldo insuficiente', type: 'err' });
+      return;
+    }
+    if (delta < 0) setStatus({ msg: '', type: '' });
     setCart(cart.map(item => {
       if (item.lineKey === lineKey) {
         const newQty = item.quantity + delta;
@@ -332,7 +417,8 @@ const POS = () => {
 
   const checkout = async () => {
     if (processing) return;
-    if (!cardId) { setStatus({ msg: 'Aproxime o cartão!', type: 'err' }); return; }
+    if (!cardId || cardBalance === null) { setStatus({ msg: 'Passe o cartão primeiro', type: 'err' }); return; }
+    if (exceedsBalance(0)) { setStatus({ msg: 'Saldo insuficiente', type: 'err' }); return; }
     setProcessing(true);
     try {
       const res = await axios.post(`${API_URL}/sales`, {
@@ -357,6 +443,9 @@ const POS = () => {
       setIsMobileCartOpen(true);
 
       setStatus({ msg: 'Venda realizada!', type: 'ok' });
+      // Volta sozinho ao ecrã inicial após 3 s, salvo se o operador pedir impressão
+      clearTimeout(autoResetRef.current);
+      autoResetRef.current = setTimeout(() => handleNewSale(), 3000);
     } catch (err) {
       setStatus({ msg: err.response?.data?.error || 'Erro na venda', type: 'err' });
       if (err.response?.status === 401) logout();
@@ -371,14 +460,51 @@ const POS = () => {
   };
 
   const handleNewSale = () => {
+    clearTimeout(autoResetRef.current);
+    autoResetRef.current = null;
     setReceipt(null);
     setCart([]);
     setCardId('');
+    setCardBalance(null);
+    focusCardInput();
     setStatus({ msg: '', type: '' });
     setIsMobileCartOpen(false);
     fetchProducts();
     // Preserves selectedCategoryId as requested: "A categoria seleccionada mantém-se depois de Nova Venda"
   };
+
+  // Impressão: cancela o regresso automático e volta ao ecrã inicial depois de imprimir
+  const handlePrint = () => {
+    clearTimeout(autoResetRef.current);
+    autoResetRef.current = null;
+    const done = () => {
+      window.removeEventListener('afterprint', done);
+      handleNewSale();
+    };
+    window.addEventListener('afterprint', done);
+    window.print();
+  };
+
+  // Tecla Esc (PC): mesmo efeito do botão ESC no ecrã
+  const escHandlerRef = useRef(null);
+  useEffect(() => {
+    escHandlerRef.current = () => {
+      if (receipt) handleNewSale();
+      else resetCard();
+    };
+  });
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && token) {
+        e.preventDefault();
+        escHandlerRef.current?.();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [token]);
+
+  useEffect(() => () => clearTimeout(autoResetRef.current), []);
 
   // Category mapping and presence of uncategorized products
   const categoryMap = useMemo(() => {
@@ -678,9 +804,9 @@ const POS = () => {
           <button
             disabled={cart.length === 0 || processing}
             onClick={() => {
-              if (!cardId) {
+              if (!cardId || cardBalance === null) {
                 setIsMobileCartOpen(true);
-                setStatus({ msg: 'Insira ou aproxime o cartão!', type: 'err' });
+                setStatus({ msg: 'Passe o cartão primeiro', type: 'err' });
               } else {
                 checkout();
               }
@@ -757,7 +883,7 @@ const POS = () => {
                 NOVA VENDA
               </button>
               <button
-                onClick={() => window.print()}
+                onClick={handlePrint}
                 className="w-full min-h-[3.5rem] bg-blue-700 text-white font-black text-base uppercase rounded-lg shadow sw-bevel active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Printer size={20} /> IMPRIMIR TALÃO
@@ -896,6 +1022,11 @@ const POS = () => {
 
             {/* Ações do Teclado */}
             <div className="p-4 bg-[#141b24] border-t-2 border-slate-900 space-y-2">
+              {status.msg && status.type === 'err' && (
+                <div className="p-3 rounded-lg text-center font-bold text-xs uppercase bg-red-950 text-red-300 border border-red-600">
+                  {status.msg}
+                </div>
+              )}
               <button
                 disabled={!selectedProduct.is_open_price && (parseInt(keypadValue) || 1) > selectedProduct.stock_quantity}
                 onClick={() => addToCart(selectedProduct, parseInt(keypadValue) || 1, selectedProduct.is_open_price ? openPriceConfirmed : null)}
@@ -924,6 +1055,22 @@ const POS = () => {
                 </h2>
               </div>
               <div className="flex items-center gap-2">
+                <div
+                  className={`px-2 py-1 rounded border font-mono text-right leading-tight ${cardBalance === null ? 'bg-[#202737] border-slate-700' : 'bg-black border-emerald-600'}`}
+                  title="Saldo disponível no cartão"
+                >
+                  <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">SALDO</div>
+                  <div className={`text-xs md:text-sm font-black whitespace-nowrap ${cardBalance === null ? 'text-slate-500' : 'text-emerald-400'}`}>
+                    {cardBalance === null ? '—' : `${(cardBalance - cartTotal).toFixed(2)} un.`}
+                  </div>
+                </div>
+                <button
+                  onClick={resetCard}
+                  className="min-h-[2.5rem] px-2.5 py-1 text-[11px] font-black text-slate-200 hover:text-white rounded bg-[#3a2430] hover:bg-[#4d2c3b] border border-slate-700 sw-bevel cursor-pointer"
+                  title="Limpar cartão e talão (Esc)"
+                >
+                  ESC
+                </button>
                 {cart.length > 0 && (
                   <button
                     onClick={() => setCart([])}
@@ -1017,16 +1164,20 @@ const POS = () => {
                 <CreditCard className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
                 <input
                   type="text"
-                  placeholder="UID DO CARTÃO RFID / NFC"
-                  className="w-full min-h-[3.5rem] pl-11 pr-3 py-3 bg-black border-2 border-slate-700 rounded-lg text-emerald-400 font-mono text-xs md:text-sm font-bold uppercase focus:border-amber-500 outline-none transition"
+                  ref={cardInputRef}
+                  autoFocus
+                  inputMode="numeric"
+                  placeholder={cardLoading ? 'A LER CARTÃO...' : 'PASSE O CARTÃO RFID / NFC'}
+                  className={`w-full min-h-[3.5rem] pl-11 pr-3 py-3 bg-black border-2 ${cardBalance === null ? 'border-amber-600' : 'border-emerald-700'} rounded-lg text-emerald-400 font-mono text-xs md:text-sm font-bold uppercase focus:border-amber-500 outline-none transition`}
                   value={cardId}
-                  onChange={e => setCardId(e.target.value)}
+                  onChange={e => handleCardInputChange(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupCard(); } }}
                 />
               </div>
 
               {/* Botão PAGAR AGORA (Mínimo 3.5rem de altura, verde vibrante com relevo tátil) */}
               <button
-                disabled={cart.length === 0 || processing}
+                disabled={cart.length === 0 || processing || cardBalance === null}
                 onClick={checkout}
                 className="w-full min-h-[3.5rem] h-14 md:h-16 bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-600 disabled:bg-slate-700 disabled:opacity-40 text-white font-black text-lg uppercase tracking-wider rounded-lg sw-bevel shadow-lg active:scale-98 transition flex items-center justify-center gap-2 cursor-pointer"
               >
